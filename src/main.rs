@@ -1,23 +1,54 @@
+use std::io::{self, Write};
+
+use evaluator::Evaluator;
+
+use crate::{parser::Parser, tokens::Tokens};
+
 mod evaluator;
 mod parser;
 mod ranged;
 mod tokens;
 
-fn main() {
-    let code = "let x = 4 in x * x";
-    let tokens = tokens::Tokens::new(code);
-    let mut parser = parser::Parser::new(tokens);
-    let mut evaluator = evaluator::Evaluator::new();
+fn main() -> io::Result<()> {
+    let mut evaluator = Evaluator::new();
 
-    let expr = match parser.parse() {
-        Ok(expr) => expr,
-        Err(error) => return println!("{error:?}"),
-    };
+    let mut stdout = io::stdout();
+    let stdin = io::stdin();
+    loop {
+        print!("> ");
+        stdout.flush()?;
 
-    let value = match evaluator.eval(&expr) {
-        Ok(value) => value,
-        Err(error) => return println!("{error:?}"),
-    };
+        let mut input = String::new();
+        stdin.read_line(&mut input)?;
+        let input = input.trim_end();
 
-    println!("= {value}");
+        match input {
+            ".exit" => break,
+            "" => continue,
+            _ => (),
+        }
+
+        let tokens = Tokens::new(input);
+        let mut parser = Parser::new(tokens);
+
+        let expr = match parser.parse() {
+            Ok(expr) => expr,
+            Err(error) => {
+                println!("{error:?}");
+                continue;
+            }
+        };
+
+        let value = match evaluator.eval(&expr) {
+            Ok(value) => value,
+            Err(error) => {
+                println!("{error:?}");
+                continue;
+            }
+        };
+
+        println!("= {value}");
+    }
+
+    Ok(())
 }
