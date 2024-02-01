@@ -28,6 +28,19 @@ impl<'source> Tokens<'source> {
 
         Token::NaturalNumber(number)
     }
+
+    fn symbol(&mut self) -> Token {
+        let mut symbol = String::new();
+        while let Some((_, ch)) = self.chars.next_if(|(_, ch)| ch.is_alphanumeric()) {
+            symbol.push(ch);
+        }
+
+        match symbol.as_str() {
+            "let" => Token::LetKeyword,
+            "in" => Token::InKeyword,
+            _ => Token::Identifier(symbol),
+        }
+    }
 }
 
 impl Iterator for Tokens<'_> {
@@ -43,6 +56,10 @@ impl Iterator for Tokens<'_> {
             return self.next();
         }
 
+        if ch.is_alphabetic() {
+            return Some(Ok(Ranged::new(self.symbol(), start, self.peek_index())));
+        }
+
         if ch.is_ascii_digit() {
             return Some(Ok(Ranged::new(self.number(), start, self.peek_index())));
         }
@@ -52,6 +69,7 @@ impl Iterator for Tokens<'_> {
             '(' => Token::OpeningParenthesis,
             ')' => Token::ClosingParenthesis,
             '*' => Token::Asterisk,
+            '=' => Token::Equals,
             '+' => Token::Plus,
             _ => {
                 return Some(Err(Ranged::new(
@@ -68,11 +86,15 @@ impl Iterator for Tokens<'_> {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Token {
+    Identifier(String),
     NaturalNumber(String),
     OpeningParenthesis,
     ClosingParenthesis,
     Asterisk,
+    Equals,
     Plus,
+    LetKeyword,
+    InKeyword,
 }
 
 #[derive(Clone, Debug)]
