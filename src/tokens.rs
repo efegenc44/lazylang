@@ -3,6 +3,8 @@ use std::{
     str::Chars,
 };
 
+use crate::ranged::Ranged;
+
 pub struct Tokens<'source> {
     chars: Peekable<Enumerate<Chars<'source>>>,
 }
@@ -29,7 +31,7 @@ impl<'source> Tokens<'source> {
 }
 
 impl Iterator for Tokens<'_> {
-    type Item = Result<(Token, usize, usize), (TokenError, usize, usize)>;
+    type Item = Result<Ranged<Token>, Ranged<TokenError>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let Some(&(start, ch)) = self.chars.peek() else {
@@ -42,7 +44,7 @@ impl Iterator for Tokens<'_> {
         }
 
         if ch.is_ascii_digit() {
-            return Some(Ok((self.number(), start, self.peek_index())));
+            return Some(Ok(Ranged::new(self.number(), start, self.peek_index())));
         }
 
         self.chars.next();
@@ -53,7 +55,7 @@ impl Iterator for Tokens<'_> {
             '^' => Token::Caret,
             '+' => Token::Plus,
             _ => {
-                return Some(Err((
+                return Some(Err(Ranged::new(
                     TokenError::UnknownStartOfAToken(ch),
                     start,
                     self.peek_index(),
@@ -61,7 +63,7 @@ impl Iterator for Tokens<'_> {
             }
         };
 
-        Some(Ok((token, start, self.peek_index())))
+        Some(Ok(Ranged::new(token, start, self.peek_index())))
     }
 }
 

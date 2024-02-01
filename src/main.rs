@@ -1,5 +1,6 @@
 mod parser;
 mod tokens;
+mod ranged;
 
 fn main() {
     let code = "  2 ^ 4 ^ 5  ";

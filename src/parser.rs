@@ -1,6 +1,6 @@
 use std::iter::Peekable;
 
-use crate::tokens::{Token, TokenError, Tokens};
+use crate::{ranged::Ranged, tokens::{Token, TokenError, Tokens}};
 
 const BINARY_OPERATORS: [(Associativity, &[Token]); 3] = [
     (Associativity::Left, &[Token::Plus]),
@@ -22,35 +22,33 @@ impl<'tokens> Parser<'tokens> {
     fn expect(&mut self, expected: Token) -> ParseResult<()> {
         match self.tokens.next() {
             Some(token_result) => {
-                let (token, start, end) = token_result
-                    .map_err(|(error, start, end)| (ParseError::TokenError(error), start, end))?;
+                let (token, start, end) = token_result?.as_tuple();
 
                 if token == expected {
-                    Ok(((), start, end))
+                    Ok(Ranged::new((), start, end))
                 } else {
-                    Err((ParseError::UnexpectedToken(token), start, end))
+                    Err(Ranged::new(ParseError::UnexpectedToken(token), start, end))
                 }
             }
-            None => Err((ParseError::UnexpectedEOF, 0, 0)),
+            None => Err(Ranged::new(ParseError::UnexpectedEOF, 0, 0)),
         }
     }
 
     fn primary(&mut self) -> ParseResult<Expression> {
         let Some(token_result) = self.tokens.next() else {
-            return Err((ParseError::UnexpectedEOF, 0, 0));
+            return Err(Ranged::new(ParseError::UnexpectedEOF, 0, 0));
         };
 
-        let (token, start, end) = token_result
-            .map_err(|(error, start, end)| (ParseError::TokenError(error), start, end))?;
+        let (token, start, end) = token_result?.as_tuple();
 
         match token {
-            Token::NaturalNumber(nat) => Ok((Expression::NaturalNumber(nat), start, end)),
+            Token::NaturalNumber(nat) => Ok(Ranged::new(Expression::NaturalNumber(nat), start, end)),
             Token::OpeningParenthesis => {
-                let (expr, _, _) = self.expression()?;
-                let ((), _, end) = self.expect(Token::ClosingParenthesis)?;
-                Ok((expr, start, end))
+                let (expr, _, _) = self.expression()?.as_tuple();
+                let ((), _, end) = self.expect(Token::ClosingParenthesis)?.as_tuple();
+                Ok(Ranged::new(expr, start, end))
             }
-            unexpected => Err((ParseError::UnexpectedToken(unexpected), start, end)),
+            unexpected => Err(Ranged::new(ParseError::UnexpectedToken(unexpected), start, end)),
         }
     }
 
@@ -65,39 +63,35 @@ impl<'tokens> Parser<'tokens> {
         match assoc {
             Associativity::Right => {
                 if let Some(token_result) = self.tokens.peek() {
-                    let (token, _, _) = token_result.as_ref().map_err(|(error, start, end)| {
-                        (ParseError::TokenError(error.clone()), *start, *end)
-                    })?;
+                    let (token, _, _) = token_result.as_ref()?.as_ref_tuple();
 
                     if ops.contains(token) {
                         let bop = token.into();
                         self.tokens.next();
-                        let (rhs, _, end) = self.binary(precedence)?;
-                        result.0 = Expression::Binary {
-                            lhs: Box::new(result.0),
+                        let (rhs, _, end) = self.binary(precedence)?.as_tuple();
+                        result.data = Expression::Binary {
+                            lhs: Box::new(result.data),
                             rhs: Box::new(rhs),
                             bop,
                         };
-                        result.2 = end;
+                        result.end = end;
                     }
                 }
             }
             Associativity::Left => {
                 while let Some(token_result) = self.tokens.peek() {
-                    let (token, _, _) = token_result.as_ref().map_err(|(error, start, end)| {
-                        (ParseError::TokenError(error.clone()), *start, *end)
-                    })?;
+                    let (token, _, _) = token_result.as_ref()?.as_ref_tuple();
 
                     if ops.contains(token) {
                         let bop = token.into();
                         self.tokens.next();
-                        let (rhs, _, end) = self.binary(precedence + 1)?;
-                        result.0 = Expression::Binary {
-                            lhs: Box::new(result.0),
+                        let (rhs, _, end) = self.binary(precedence + 1)?.as_tuple();
+                        result.data = Expression::Binary {
+                            lhs: Box::new(result.data),
                             rhs: Box::new(rhs),
                             bop,
                         };
-                        result.2 = end;
+                        result.end = end;
                     } else {
                         break;
                     }
@@ -105,20 +99,18 @@ impl<'tokens> Parser<'tokens> {
             }
             Associativity::None => {
                 if let Some(token_result) = self.tokens.peek() {
-                    let (token, _, _) = token_result.as_ref().map_err(|(error, start, end)| {
-                        (ParseError::TokenError(error.clone()), *start, *end)
-                    })?;
+                    let (token, _, _) = token_result.as_ref()?.as_ref_tuple();
 
                     if ops.contains(token) {
                         let bop = token.into();
                         self.tokens.next();
-                        let (rhs, _, end) = self.binary(precedence + 1)?;
-                        result.0 = Expression::Binary {
-                            lhs: Box::new(result.0),
+                        let (rhs, _, end) = self.binary(precedence + 1)?.as_tuple();
+                        result.data = Expression::Binary {
+                            lhs: Box::new(result.data),
                             rhs: Box::new(rhs),
                             bop,
                         };
-                        result.2 = end;
+                        result.end = end;
                     }
                 }
             }
@@ -131,15 +123,14 @@ impl<'tokens> Parser<'tokens> {
     }
 
     pub fn parse(&mut self) -> ParseResult<Expression> {
-        let (expr, start, end) = self.expression()?;
+        let (expr, start, end) = self.expression()?.as_tuple();
 
         match self.tokens.next() {
             Some(token_result) => {
-                let (_, start, _) = token_result
-                    .map_err(|(error, start, end)| (ParseError::TokenError(error), start, end))?;
-                Err((ParseError::Unconsumed, start, 0))
+                let (_, start, _) = token_result?.as_tuple();
+                Err(Ranged::new(ParseError::Unconsumed, start, 0))
             }
-            None => Ok((expr, start, end)),
+            None => Ok(Ranged::new(expr, start, end)),
         }
     }
 }
@@ -152,7 +143,21 @@ pub enum ParseError {
     Unconsumed,
 }
 
-type ParseResult<T> = Result<(T, usize, usize), (ParseError, usize, usize)>;
+impl From<Ranged<TokenError>> for Ranged<ParseError> {
+    fn from(value: Ranged<TokenError>) -> Self {
+        let (data, start, end) = value.as_tuple();
+        Self::new(ParseError::TokenError(data), start, end)
+    }
+}
+
+impl From<&Ranged<TokenError>> for Ranged<ParseError> {
+    fn from(value: &Ranged<TokenError>) -> Self {
+        let (data, start, end) = value.as_ref_tuple();
+        Self::new(ParseError::TokenError(data.clone()), *start, *end)
+    }
+}
+
+type ParseResult<T> = Result<Ranged<T>, Ranged<ParseError>>;
 
 #[derive(Debug)]
 pub enum Expression {
