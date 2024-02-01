@@ -69,7 +69,7 @@ impl Evaluator {
         &mut self,
         lhs: &Ranged<Expression>,
         rhs: &Ranged<Expression>,
-        bop: &BinaryOp,
+        bop: BinaryOp,
     ) -> EvaluationResult<Value> {
         let (lvalue, rvalue) = (self.eval(lhs)?, self.eval(rhs)?);
 
@@ -77,14 +77,26 @@ impl Evaluator {
             BinaryOp::Addition => {
                 let (lhs, rhs) = match (lvalue, rvalue) {
                     (Value::Integer(lint), Value::Integer(rint)) => (lint, rint),
-                    _ => return Err(Ranged::new(EvaluationError::ExpectedNumbers, lhs.start, rhs.end)),
+                    _ => {
+                        return Err(Ranged::new(
+                            EvaluationError::ExpectedNumbers,
+                            lhs.start,
+                            rhs.end,
+                        ))
+                    }
                 };
                 Value::Integer(lhs + rhs)
             }
             BinaryOp::Multiplication => {
                 let (lhs, rhs) = match (lvalue, rvalue) {
                     (Value::Integer(lint), Value::Integer(rint)) => (lint, rint),
-                    _ => return Err(Ranged::new(EvaluationError::ExpectedNumbers, lhs.start, rhs.end)),
+                    _ => {
+                        return Err(Ranged::new(
+                            EvaluationError::ExpectedNumbers,
+                            lhs.start,
+                            rhs.end,
+                        ))
+                    }
                 };
                 Value::Integer(lhs * rhs)
             }
@@ -112,16 +124,53 @@ impl Evaluator {
         result
     }
 
+    fn eval_application(
+        &mut self,
+        expr: &Ranged<Expression>,
+        arguments: &[Ranged<Expression>],
+    ) -> EvaluationResult<Value> {
+        let Value::Function { closure, arguments: farguments, expr: fexpr } = self.eval(expr)? else {
+            return Err(Ranged::new(EvaluationError::ExpectedFunction, expr.start, expr.end))
+        };
+
+        if arguments.len() != farguments.len() {
+            return Err(Ranged::new(
+                EvaluationError::ArityMismatch,
+                expr.start,
+                expr.end,
+            ));
+        }
+
+        let local_len = self.locals.len();
+        self.locals.extend(closure);
+        for (argument, pattern) in arguments.iter().zip(farguments) {
+            let value = self.eval(argument)?;
+            let true = Self::check_pattern(&pattern, &value) else {
+                return Err(Ranged::new(EvaluationError::UnmatchedPattern, pattern.start, pattern.end))
+            };
+            self.define_pattern_locals(&pattern, value);
+        }
+        let result = self.eval(&fexpr);
+        self.locals.truncate(local_len);
+        result
+    }
+
     pub fn eval(&mut self, expr: &Ranged<Expression>) -> EvaluationResult<Value> {
         match &expr.data {
             Expression::Identifier(ident) => Ok(self.resolve_ident(ident, expr.start, expr.end)?),
             Expression::NaturalNumber(nat) => Ok(Value::Integer(nat.parse().unwrap())),
-            Expression::Binary { lhs, rhs, bop } => self.eval_binary(lhs, rhs, bop),
+            Expression::Binary { lhs, rhs, bop } => self.eval_binary(lhs, rhs, *bop),
             Expression::Let {
                 pattern,
                 vexpr,
                 rexpr,
             } => self.eval_let(pattern, vexpr, rexpr),
+            Expression::Function { arguments, expr } => Ok(Value::Function {
+                closure: self.locals.clone(),
+                arguments: arguments.clone(),
+                expr: *expr.clone(),
+            }),
+            Expression::Application { expr, arguments } => self.eval_application(expr, arguments),
         }
     }
 }
@@ -130,7 +179,9 @@ impl Evaluator {
 pub enum EvaluationError {
     UnmatchedPattern,
     UnboundIdentifier(String),
-    ExpectedNumbers
+    ExpectedNumbers,
+    ExpectedFunction,
+    ArityMismatch,
 }
 
 type EvaluationResult<T> = Result<T, Ranged<EvaluationError>>;
@@ -142,6 +193,11 @@ pub enum Value {
         first: Box<Value>,
         second: Box<Value>,
     },
+    Function {
+        closure: Vec<(String, Value)>,
+        arguments: Vec<Ranged<Pattern>>,
+        expr: Ranged<Expression>,
+    },
 }
 
 impl std::fmt::Display for Value {
@@ -149,6 +205,7 @@ impl std::fmt::Display for Value {
         match self {
             Self::Integer(int) => write!(f, "{int}"),
             Self::Pair { first, second } => write!(f, "({first}:{second})"),
+            Self::Function { .. } => write!(f, "<function>"),
         }
     }
 }

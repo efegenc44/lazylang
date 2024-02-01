@@ -125,6 +125,31 @@ impl<'tokens> Parser<'tokens> {
                     end,
                 ))
             }
+            Token::FunKeyword => {
+                self.expect(Token::OpeningParenthesis)?;
+
+                let mut arguments = vec![];
+                if let Some(token_result) = self.tokens.peek() {
+                    if !matches!(token_result.as_ref()?.data, Token::ClosingParenthesis) {
+                        arguments.push(self.pattern()?);
+                        while let Some(token_result) = self.tokens.peek() {
+                            if let (Token::ClosingParenthesis, _, _) = token_result.as_ref()?.as_tuple() {
+                                break;
+                            };
+                            self.expect(Token::Comma)?;
+                            arguments.push(self.pattern()?);
+                        }
+                    }
+                }
+                self.expect(Token::ClosingParenthesis)?;
+                let expr = Box::new(self.expression()?);
+                let end = expr.end;
+                Ok(Ranged::new(
+                    Expression::Function { arguments, expr },
+                    start,
+                    end,
+                ))
+            }
             unexpected => Err(Ranged::new(
                 ParseError::UnexpectedToken(unexpected),
                 start,
@@ -133,8 +158,47 @@ impl<'tokens> Parser<'tokens> {
         }
     }
 
+    fn application(&mut self) -> ParseResult<Expression> {
+        let mut primary = self.primary()?;
+
+        while let Some(token_result) = self.tokens.peek() {
+            let (Token::OpeningParenthesis, _, _) = token_result.as_ref()?.as_tuple() else {
+                break;
+            };
+            self.tokens.next();
+
+            let mut arguments = vec![];
+            if let Some(token_result) = self.tokens.peek() {
+                if !matches!(token_result.as_ref()?.data, Token::ClosingParenthesis) {
+                    arguments.push(self.expression()?);
+                    while let Some(token_result) = self.tokens.peek() {
+                        if let (Token::ClosingParenthesis, _, _) = token_result.as_ref()?.as_tuple()
+                        {
+                            break;
+                        };
+                        self.expect(Token::Comma)?;
+                        arguments.push(self.expression()?);
+                    }
+                }
+            }
+            let ((), _, end) = self.expect(Token::ClosingParenthesis)?.into_tuple();
+            let start = primary.start;
+
+            primary = Ranged::new(
+                Expression::Application {
+                    expr: Box::new(primary),
+                    arguments,
+                },
+                start,
+                end,
+            );
+        }
+
+        Ok(primary)
+    }
+
     fn binary(&mut self, min_prec: usize) -> ParseResult<Expression> {
-        let mut expr = self.primary()?;
+        let mut expr = self.application()?;
 
         while let Some(token_result) = self.tokens.peek() {
             let (token, _, _) = token_result.as_ref()?.as_tuple();
@@ -214,7 +278,7 @@ impl From<&Ranged<TokenError>> for Ranged<ParseError> {
 
 type ParseResult<T> = Result<Ranged<T>, Ranged<ParseError>>;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Expression {
     Identifier(String),
     NaturalNumber(String),
@@ -227,6 +291,14 @@ pub enum Expression {
         pattern: Ranged<Pattern>,
         vexpr: Box<Ranged<Expression>>,
         rexpr: Box<Ranged<Expression>>,
+    },
+    Function {
+        arguments: Vec<Ranged<Pattern>>,
+        expr: Box<Ranged<Expression>>,
+    },
+    Application {
+        expr: Box<Ranged<Expression>>,
+        arguments: Vec<Ranged<Expression>>,
     },
 }
 
@@ -242,11 +314,13 @@ impl Ranged<Expression> {
                 rhs.pretty_print(indent + 1);
             }
             Expression::Let { .. } => todo!(),
+            Expression::Function { .. } => todo!(),
+            Expression::Application { .. } => todo!(),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Pattern {
     All(String),
     NaturalNumber(String),
@@ -256,7 +330,7 @@ pub enum Pattern {
     },
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum BinaryOp {
     Addition,
     Multiplication,

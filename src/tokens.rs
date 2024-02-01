@@ -38,6 +38,7 @@ impl<'source> Tokens<'source> {
         match symbol.as_str() {
             "let" => Token::LetKeyword,
             "in" => Token::InKeyword,
+            "fun" => Token::FunKeyword,
             _ => Token::Identifier(symbol),
         }
     }
@@ -71,6 +72,7 @@ impl Iterator for Tokens<'_> {
             '*' => Token::Asterisk,
             '=' => Token::Equals,
             ':' => Token::Colon,
+            ',' => Token::Comma,
             '+' => Token::Plus,
             _ => {
                 return Some(Err(Ranged::new(
@@ -94,9 +96,11 @@ pub enum Token {
     Asterisk,
     Equals,
     Colon,
+    Comma,
     Plus,
     LetKeyword,
     InKeyword,
+    FunKeyword,
 }
 
 #[derive(Clone, Debug)]

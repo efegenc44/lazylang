@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Ranged<T> {
     pub data: T,
     pub start: usize,
