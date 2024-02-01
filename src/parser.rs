@@ -1,11 +1,14 @@
 use std::iter::Peekable;
 
-use crate::{ranged::Ranged, tokens::{Token, TokenError, Tokens}};
+use crate::{
+    ranged::Ranged,
+    tokens::{Token, TokenError, Tokens},
+};
 
-const BINARY_OPERATORS: [(Associativity, &[Token]); 3] = [
-    (Associativity::Left, &[Token::Plus]),
-    (Associativity::Left, &[Token::Asterisk]),
-    (Associativity::Right, &[Token::Caret]),
+const BINARY_OPERATORS: [(Token, Associativity, usize); 3] = [
+    (Token::Plus, Associativity::Left, 0),
+    (Token::Asterisk, Associativity::Left, 1),
+    (Token::Caret, Associativity::Right, 2),
 ];
 
 pub struct Parser<'tokens> {
@@ -19,10 +22,11 @@ impl<'tokens> Parser<'tokens> {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     fn expect(&mut self, expected: Token) -> ParseResult<()> {
         match self.tokens.next() {
             Some(token_result) => {
-                let (token, start, end) = token_result?.as_tuple();
+                let (token, start, end) = token_result?.into_tuple();
 
                 if token == expected {
                     Ok(Ranged::new((), start, end))
@@ -39,83 +43,60 @@ impl<'tokens> Parser<'tokens> {
             return Err(Ranged::new(ParseError::UnexpectedEOF, 0, 0));
         };
 
-        let (token, start, end) = token_result?.as_tuple();
+        let (token, start, end) = token_result?.into_tuple();
 
         match token {
-            Token::NaturalNumber(nat) => Ok(Ranged::new(Expression::NaturalNumber(nat), start, end)),
+            Token::NaturalNumber(nat) => {
+                Ok(Ranged::new(Expression::NaturalNumber(nat), start, end))
+            }
             Token::OpeningParenthesis => {
-                let (expr, _, _) = self.expression()?.as_tuple();
-                let ((), _, end) = self.expect(Token::ClosingParenthesis)?.as_tuple();
+                let (expr, _, _) = self.expression()?.into_tuple();
+                let ((), _, end) = self.expect(Token::ClosingParenthesis)?.into_tuple();
                 Ok(Ranged::new(expr, start, end))
             }
-            unexpected => Err(Ranged::new(ParseError::UnexpectedToken(unexpected), start, end)),
+            unexpected => Err(Ranged::new(
+                ParseError::UnexpectedToken(unexpected),
+                start,
+                end,
+            )),
         }
     }
 
-    fn binary(&mut self, precedence: usize) -> ParseResult<Expression> {
-        if precedence >= BINARY_OPERATORS.len() {
-            return self.primary();
-        }
+    fn binary(&mut self, min_prec: usize) -> ParseResult<Expression> {
+        let mut expr = self.primary()?;
 
-        let mut result = self.binary(precedence + 1)?;
+        while let Some(token_result) = self.tokens.peek() {
+            let (token, _, _) = token_result.as_ref()?.as_tuple();
 
-        let (assoc, ops) = &BINARY_OPERATORS[precedence];
-        match assoc {
-            Associativity::Right => {
-                if let Some(token_result) = self.tokens.peek() {
-                    let (token, _, _) = token_result.as_ref()?.as_ref_tuple();
+            let Some((op_token, assoc, prec)) = BINARY_OPERATORS.iter().find(|(op_token, _, _)| op_token == token) else {
+                break;
+            };
 
-                    if ops.contains(token) {
-                        let bop = token.into();
-                        self.tokens.next();
-                        let (rhs, _, end) = self.binary(precedence)?.as_tuple();
-                        result.data = Expression::Binary {
-                            lhs: Box::new(result.data),
-                            rhs: Box::new(rhs),
-                            bop,
-                        };
-                        result.end = end;
-                    }
-                }
+            if prec < &min_prec {
+                break;
             }
-            Associativity::Left => {
-                while let Some(token_result) = self.tokens.peek() {
-                    let (token, _, _) = token_result.as_ref()?.as_ref_tuple();
 
-                    if ops.contains(token) {
-                        let bop = token.into();
-                        self.tokens.next();
-                        let (rhs, _, end) = self.binary(precedence + 1)?.as_tuple();
-                        result.data = Expression::Binary {
-                            lhs: Box::new(result.data),
-                            rhs: Box::new(rhs),
-                            bop,
-                        };
-                        result.end = end;
-                    } else {
-                        break;
-                    }
-                }
-            }
-            Associativity::None => {
-                if let Some(token_result) = self.tokens.peek() {
-                    let (token, _, _) = token_result.as_ref()?.as_ref_tuple();
+            let bop = op_token.into();
+            let prec = *prec;
 
-                    if ops.contains(token) {
-                        let bop = token.into();
-                        self.tokens.next();
-                        let (rhs, _, end) = self.binary(precedence + 1)?.as_tuple();
-                        result.data = Expression::Binary {
-                            lhs: Box::new(result.data),
-                            rhs: Box::new(rhs),
-                            bop,
-                        };
-                        result.end = end;
-                    }
-                }
+            self.tokens.next();
+            let (rhs, _, end) = self
+                .binary(prec + usize::from(assoc != &Associativity::Right))?
+                .into_tuple();
+
+            expr.data = Expression::Binary {
+                lhs: Box::new(expr.data),
+                rhs: Box::new(rhs),
+                bop,
+            };
+            expr.end = end;
+
+            if assoc == &Associativity::None {
+                break;
             }
         }
-        Ok(result)
+
+        Ok(expr)
     }
 
     fn expression(&mut self) -> ParseResult<Expression> {
@@ -123,11 +104,11 @@ impl<'tokens> Parser<'tokens> {
     }
 
     pub fn parse(&mut self) -> ParseResult<Expression> {
-        let (expr, start, end) = self.expression()?.as_tuple();
+        let (expr, start, end) = self.expression()?.into_tuple();
 
         match self.tokens.next() {
             Some(token_result) => {
-                let (_, start, _) = token_result?.as_tuple();
+                let (_, start, _) = token_result?.into_tuple();
                 Err(Ranged::new(ParseError::Unconsumed, start, 0))
             }
             None => Ok(Ranged::new(expr, start, end)),
@@ -145,14 +126,14 @@ pub enum ParseError {
 
 impl From<Ranged<TokenError>> for Ranged<ParseError> {
     fn from(value: Ranged<TokenError>) -> Self {
-        let (data, start, end) = value.as_tuple();
+        let (data, start, end) = value.into_tuple();
         Self::new(ParseError::TokenError(data), start, end)
     }
 }
 
 impl From<&Ranged<TokenError>> for Ranged<ParseError> {
     fn from(value: &Ranged<TokenError>) -> Self {
-        let (data, start, end) = value.as_ref_tuple();
+        let (data, start, end) = value.as_tuple();
         Self::new(ParseError::TokenError(data.clone()), *start, *end)
     }
 }
@@ -169,11 +150,34 @@ pub enum Expression {
     },
 }
 
+impl Expression {
+    pub fn pretty_print(&self, indent: usize) {
+        match self {
+            Self::NaturalNumber(nat) => println!("{:indent$}{nat}", ""),
+            Self::Binary { lhs, rhs, bop } => {
+                println!("{:indent$}{bop}", "");
+                lhs.pretty_print(indent + 1);
+                rhs.pretty_print(indent + 1);
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum BinaryOp {
     Addition,
     Multiplication,
     Exponentiation,
+}
+
+impl std::fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Addition => write!(f, "+"),
+            Self::Multiplication => write!(f, "*"),
+            Self::Exponentiation => write!(f, "^"),
+        }
+    }
 }
 
 impl From<&Token> for BinaryOp {
@@ -187,8 +191,10 @@ impl From<&Token> for BinaryOp {
     }
 }
 
+#[derive(PartialEq)]
 enum Associativity {
     Right,
     Left,
+    #[allow(unused)]
     None,
 }
