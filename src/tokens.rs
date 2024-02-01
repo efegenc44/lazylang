@@ -70,6 +70,7 @@ impl Iterator for Tokens<'_> {
             ')' => Token::ClosingParenthesis,
             '*' => Token::Asterisk,
             '=' => Token::Equals,
+            ':' => Token::Colon,
             '+' => Token::Plus,
             _ => {
                 return Some(Err(Ranged::new(
@@ -92,6 +93,7 @@ pub enum Token {
     ClosingParenthesis,
     Asterisk,
     Equals,
+    Colon,
     Plus,
     LetKeyword,
     InKeyword,

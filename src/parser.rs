@@ -5,9 +5,10 @@ use crate::{
     tokens::{Token, TokenError, Tokens},
 };
 
-const BINARY_OPERATORS: [(Token, Associativity, usize); 2] = [
-    (Token::Plus, Associativity::Left, 0),
-    (Token::Asterisk, Associativity::Left, 1),
+const BINARY_OPERATORS: [(Token, Associativity, usize); 3] = [
+    (Token::Colon, Associativity::Right, 0),
+    (Token::Plus, Associativity::Left, 1),
+    (Token::Asterisk, Associativity::Left, 2),
 ];
 
 pub struct Parser<'tokens> {
@@ -37,7 +38,7 @@ impl<'tokens> Parser<'tokens> {
         }
     }
 
-    fn pattern(&mut self) -> ParseResult<Pattern> {
+    fn primary_pattern(&mut self) -> ParseResult<Pattern> {
         let Some(token_result) = self.tokens.next() else {
             return Err(Ranged::new(ParseError::UnexpectedEOF, 0, 0));
         };
@@ -58,6 +59,36 @@ impl<'tokens> Parser<'tokens> {
                 end,
             )),
         }
+    }
+
+    fn pair_pattern(&mut self) -> ParseResult<Pattern> {
+        let primary = self.primary_pattern()?;
+
+        if let Some(token_result) = self.tokens.peek() {
+            let (Token::Colon, _, _) = token_result.as_ref()?.as_tuple() else {
+                return Ok(primary);
+            };
+
+            self.tokens.next();
+            let second = self.pair_pattern()?;
+
+            let start = primary.start;
+            let end = second.end;
+            return Ok(Ranged::new(
+                Pattern::Pair {
+                    first: Box::new(primary),
+                    second: Box::new(second),
+                },
+                start,
+                end,
+            ));
+        }
+
+        Ok(primary)
+    }
+
+    fn pattern(&mut self) -> ParseResult<Pattern> {
+        self.pair_pattern()
     }
 
     fn primary(&mut self) -> ParseResult<Expression> {
@@ -219,12 +250,17 @@ impl Ranged<Expression> {
 pub enum Pattern {
     All(String),
     NaturalNumber(String),
+    Pair {
+        first: Box<Ranged<Pattern>>,
+        second: Box<Ranged<Pattern>>,
+    },
 }
 
 #[derive(Debug)]
 pub enum BinaryOp {
     Addition,
     Multiplication,
+    Pairing,
 }
 
 impl std::fmt::Display for BinaryOp {
@@ -232,6 +268,7 @@ impl std::fmt::Display for BinaryOp {
         match self {
             Self::Addition => write!(f, "+"),
             Self::Multiplication => write!(f, "*"),
+            Self::Pairing => write!(f, ":"),
         }
     }
 }
@@ -241,6 +278,7 @@ impl From<&Token> for BinaryOp {
         match val {
             Token::Asterisk => Self::Multiplication,
             Token::Plus => Self::Addition,
+            Token::Colon => Self::Pairing,
             _ => unreachable!(),
         }
     }

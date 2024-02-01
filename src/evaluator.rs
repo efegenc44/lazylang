@@ -32,7 +32,17 @@ impl Evaluator {
             (Pattern::NaturalNumber(nat), Value::Integer(int)) => {
                 &nat.parse::<isize>().unwrap() == int
             }
+            (
+                Pattern::Pair { first, second },
+                Value::Pair {
+                    first: first_value,
+                    second: second_value,
+                },
+            ) => {
+                Self::check_pattern(first, first_value) && Self::check_pattern(second, second_value)
+            }
             (Pattern::All(_), _) => true,
+            _ => false,
         }
     }
 
@@ -40,6 +50,16 @@ impl Evaluator {
         match (&pattern.data, value) {
             (Pattern::All(ident), value) => {
                 self.locals.push((ident.clone(), value));
+            }
+            (
+                Pattern::Pair { first, second },
+                Value::Pair {
+                    first: first_value,
+                    second: second_value,
+                },
+            ) => {
+                self.define_pattern_locals(first, *first_value);
+                self.define_pattern_locals(second, *second_value);
             }
             _ => (),
         }
@@ -51,13 +71,27 @@ impl Evaluator {
         rhs: &Ranged<Expression>,
         bop: &BinaryOp,
     ) -> EvaluationResult<Value> {
-        let (lhs, rhs) = match (self.eval(lhs)?, self.eval(rhs)?) {
-            (Value::Integer(lint), Value::Integer(rint)) => (lint, rint),
-        };
+        let (lvalue, rvalue) = (self.eval(lhs)?, self.eval(rhs)?);
 
         Ok(match bop {
-            BinaryOp::Addition => Value::Integer(lhs + rhs),
-            BinaryOp::Multiplication => Value::Integer(lhs * rhs),
+            BinaryOp::Addition => {
+                let (lhs, rhs) = match (lvalue, rvalue) {
+                    (Value::Integer(lint), Value::Integer(rint)) => (lint, rint),
+                    _ => return Err(Ranged::new(EvaluationError::ExpectedNumbers, lhs.start, rhs.end)),
+                };
+                Value::Integer(lhs + rhs)
+            }
+            BinaryOp::Multiplication => {
+                let (lhs, rhs) = match (lvalue, rvalue) {
+                    (Value::Integer(lint), Value::Integer(rint)) => (lint, rint),
+                    _ => return Err(Ranged::new(EvaluationError::ExpectedNumbers, lhs.start, rhs.end)),
+                };
+                Value::Integer(lhs * rhs)
+            }
+            BinaryOp::Pairing => Value::Pair {
+                first: Box::new(lvalue),
+                second: Box::new(rvalue),
+            },
         })
     }
 
@@ -96,6 +130,7 @@ impl Evaluator {
 pub enum EvaluationError {
     UnmatchedPattern,
     UnboundIdentifier(String),
+    ExpectedNumbers
 }
 
 type EvaluationResult<T> = Result<T, Ranged<EvaluationError>>;
@@ -103,12 +138,17 @@ type EvaluationResult<T> = Result<T, Ranged<EvaluationError>>;
 #[derive(Clone)]
 pub enum Value {
     Integer(isize),
+    Pair {
+        first: Box<Value>,
+        second: Box<Value>,
+    },
 }
 
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Integer(int) => write!(f, "{int}"),
+            Self::Pair { first, second } => write!(f, "({first}:{second})"),
         }
     }
 }
