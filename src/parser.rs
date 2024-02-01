@@ -5,10 +5,9 @@ use crate::{
     tokens::{Token, TokenError, Tokens},
 };
 
-const BINARY_OPERATORS: [(Token, Associativity, usize); 3] = [
+const BINARY_OPERATORS: [(Token, Associativity, usize); 2] = [
     (Token::Plus, Associativity::Left, 0),
     (Token::Asterisk, Associativity::Left, 1),
-    (Token::Caret, Associativity::Right, 2),
 ];
 
 pub struct Parser<'tokens> {
@@ -80,16 +79,19 @@ impl<'tokens> Parser<'tokens> {
             let prec = *prec;
 
             self.tokens.next();
-            let (rhs, _, end) = self
-                .binary(prec + usize::from(assoc != &Associativity::Right))?
-                .into_tuple();
+            let rhs = self.binary(prec + usize::from(assoc != &Associativity::Right))?;
 
-            expr.data = Expression::Binary {
-                lhs: Box::new(expr.data),
-                rhs: Box::new(rhs),
-                bop,
-            };
-            expr.end = end;
+            let start = expr.start;
+            let end = rhs.end;
+            expr = Ranged::new(
+                Expression::Binary {
+                    lhs: Box::new(expr),
+                    rhs: Box::new(rhs),
+                    bop,
+                },
+                start,
+                end,
+            );
 
             if assoc == &Associativity::None {
                 break;
@@ -144,17 +146,18 @@ type ParseResult<T> = Result<Ranged<T>, Ranged<ParseError>>;
 pub enum Expression {
     NaturalNumber(String),
     Binary {
-        lhs: Box<Expression>,
-        rhs: Box<Expression>,
+        lhs: Box<Ranged<Expression>>,
+        rhs: Box<Ranged<Expression>>,
         bop: BinaryOp,
     },
 }
 
-impl Expression {
+impl Ranged<Expression> {
+    #[allow(unused)]
     pub fn pretty_print(&self, indent: usize) {
-        match self {
-            Self::NaturalNumber(nat) => println!("{:indent$}{nat}", ""),
-            Self::Binary { lhs, rhs, bop } => {
+        match &self.data {
+            Expression::NaturalNumber(nat) => println!("{:indent$}{nat}", ""),
+            Expression::Binary { lhs, rhs, bop } => {
                 println!("{:indent$}{bop}", "");
                 lhs.pretty_print(indent + 1);
                 rhs.pretty_print(indent + 1);
@@ -167,7 +170,6 @@ impl Expression {
 pub enum BinaryOp {
     Addition,
     Multiplication,
-    Exponentiation,
 }
 
 impl std::fmt::Display for BinaryOp {
@@ -175,7 +177,6 @@ impl std::fmt::Display for BinaryOp {
         match self {
             Self::Addition => write!(f, "+"),
             Self::Multiplication => write!(f, "*"),
-            Self::Exponentiation => write!(f, "^"),
         }
     }
 }
@@ -184,7 +185,6 @@ impl From<&Token> for BinaryOp {
     fn from(val: &Token) -> Self {
         match val {
             Token::Asterisk => Self::Multiplication,
-            Token::Caret => Self::Exponentiation,
             Token::Plus => Self::Addition,
             _ => unreachable!(),
         }

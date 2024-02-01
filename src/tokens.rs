@@ -52,7 +52,6 @@ impl Iterator for Tokens<'_> {
             '(' => Token::OpeningParenthesis,
             ')' => Token::ClosingParenthesis,
             '*' => Token::Asterisk,
-            '^' => Token::Caret,
             '+' => Token::Plus,
             _ => {
                 return Some(Err(Ranged::new(
@@ -73,7 +72,6 @@ pub enum Token {
     OpeningParenthesis,
     ClosingParenthesis,
     Asterisk,
-    Caret,
     Plus,
 }
 
