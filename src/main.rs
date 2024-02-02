@@ -1,4 +1,8 @@
-use std::{env::args, fs, io::{self, Write}};
+use std::{
+    env::args,
+    fs,
+    io::{self, Write},
+};
 
 use evaluator::{Evaluator, Module};
 
@@ -12,15 +16,20 @@ mod tokens;
 fn main() -> io::Result<()> {
     match &args().collect::<Vec<_>>()[1..] {
         [] => repl(),
-        [file_path, ..] => from_file(file_path)
+        [file_path, ..] => from_file(file_path),
     }
 }
 
 fn from_file(file_path: &str) -> io::Result<()> {
     let file = fs::read_to_string(file_path)?;
     let tokens = Tokens::new(&file);
-    let module = Parser::new(tokens).parse_module().unwrap().data;
-    println!("{}", Evaluator::new().eval_main(file_path.to_string(), &module).unwrap());
+    let module = Parser::new(tokens).parse_module().unwrap();
+    println!(
+        "{}",
+        Evaluator::new()
+            .eval_main(file_path.to_string(), &module)
+            .unwrap()
+    );
     Ok(())
 }
 

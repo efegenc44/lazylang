@@ -80,13 +80,11 @@ impl<'tokens> Parser<'tokens> {
         let primary = self.primary_pattern()?;
 
         if let Some(token_result) = self.tokens.peek() {
-            let (Token::Colon, _, _) = token_result.as_ref()?.as_tuple() else {
+            let Token::Colon = token_result.as_ref()?.data else {
                 return Ok(primary);
             };
-
             self.tokens.next();
             let second = self.pair_pattern()?;
-
             let start = primary.start;
             let end = second.end;
             return Ok(Ranged::new(
@@ -106,6 +104,63 @@ impl<'tokens> Parser<'tokens> {
         self.pair_pattern()
     }
 
+    fn parse_let(&mut self, start: usize) -> ParseResult<Expression> {
+        let pattern = self.pattern()?;
+        self.expect(Token::Equals)?;
+        let value_expr = Box::new(self.expression()?);
+        self.expect(Token::InKeyword)?;
+        let return_expr = Box::new(self.expression()?);
+        let end = return_expr.end;
+        Ok(Ranged::new(
+            Expression::Let {
+                pattern,
+                vexpr: value_expr,
+                rexpr: return_expr,
+            },
+            start,
+            end,
+        ))
+    }
+
+    fn parse_lambda(&mut self, start: usize) -> ParseResult<Expression> {
+        self.expect(Token::OpeningParenthesis)?;
+        let mut args = vec![];
+        if let Some(token_result) = self.tokens.peek() {
+            if !matches!(token_result.as_ref()?.data, Token::ClosingParenthesis) {
+                args.push(self.pattern()?);
+                while let Some(token_result) = self.tokens.peek() {
+                    if token_result.as_ref()?.data == Token::ClosingParenthesis {
+                        break;
+                    };
+                    self.expect(Token::Comma)?;
+                    args.push(self.pattern()?);
+                }
+            }
+        }
+        self.expect(Token::ClosingParenthesis)?;
+        let expr = Box::new(self.expression()?);
+        let end = expr.end;
+
+        Ok(Ranged::new(Expression::Function { args, expr }, start, end))
+    }
+
+    fn parse_import(&mut self, start: usize) -> ParseResult<Expression> {
+        let part = self.expect_ident()?;
+        let mut end = part.end;
+        let mut parts = vec![part.data];
+        while let Some(token_result) = self.tokens.peek() {
+            let Token::Dot = token_result.as_ref()?.data else {
+                break
+            };
+            self.tokens.next();
+            let part = self.expect_ident()?;
+            end = part.end;
+            parts.push(part.data);
+        }
+
+        Ok(Ranged::new(Expression::Import(parts), start, end))
+    }
+
     fn primary(&mut self) -> ParseResult<Expression> {
         let Some(token_result) = self.tokens.next() else {
             return Err(Ranged::new(ParseError::UnexpectedEOF, 0, 0));
@@ -119,67 +174,13 @@ impl<'tokens> Parser<'tokens> {
                 Ok(Ranged::new(Expression::NaturalNumber(nat), start, end))
             }
             Token::OpeningParenthesis => {
-                let (expr, _, _) = self.expression()?.into_tuple();
-                let ((), _, end) = self.expect(Token::ClosingParenthesis)?.into_tuple();
+                let expr = self.expression()?.data;
+                let end = self.expect(Token::ClosingParenthesis)?.end;
                 Ok(Ranged::new(expr, start, end))
             }
-            Token::LetKeyword => {
-                let pattern = self.pattern()?;
-                self.expect(Token::Equals)?;
-                let vexpr = Box::new(self.expression()?);
-                self.expect(Token::InKeyword)?;
-                let rexpr = Box::new(self.expression()?);
-                let end = rexpr.end;
-                Ok(Ranged::new(
-                    Expression::Let {
-                        pattern,
-                        vexpr,
-                        rexpr,
-                    },
-                    start,
-                    end,
-                ))
-            }
-            Token::FunKeyword => {
-                self.expect(Token::OpeningParenthesis)?;
-
-                let mut arguments = vec![];
-                if let Some(token_result) = self.tokens.peek() {
-                    if !matches!(token_result.as_ref()?.data, Token::ClosingParenthesis) {
-                        arguments.push(self.pattern()?);
-                        while let Some(token_result) = self.tokens.peek() {
-                            if let (Token::ClosingParenthesis, _, _) = token_result.as_ref()?.as_tuple() {
-                                break;
-                            };
-                            self.expect(Token::Comma)?;
-                            arguments.push(self.pattern()?);
-                        }
-                    }
-                }
-                self.expect(Token::ClosingParenthesis)?;
-                let expr = Box::new(self.expression()?);
-                let end = expr.end;
-                Ok(Ranged::new(
-                    Expression::Function { arguments, expr },
-                    start,
-                    end,
-                ))
-            }
-            Token::ImportKeyword => {
-                let ident = self.expect_ident()?;
-                let mut end = ident.end;
-                let mut parts = vec![ident.data];
-                while let Some(token_result) = self.tokens.peek() {
-                    let Token::Dot = token_result.as_ref()?.data else {
-                        break
-                    };
-                    self.tokens.next();
-                    let ident = self.expect_ident()?;
-                    end = ident.end;
-                    parts.push(ident.data);
-                }
-                Ok(Ranged::new(Expression::Import(parts), start, end))
-            }
+            Token::LetKeyword => self.parse_let(start),
+            Token::FunKeyword => self.parse_lambda(start),
+            Token::ImportKeyword => self.parse_import(start),
             unexpected => Err(Ranged::new(
                 ParseError::UnexpectedToken(unexpected),
                 start,
@@ -189,35 +190,32 @@ impl<'tokens> Parser<'tokens> {
     }
 
     fn application_and_access(&mut self) -> ParseResult<Expression> {
-        let mut primary = self.primary()?;
+        let mut expr = self.primary()?;
 
         while let Some(token_result) = self.tokens.peek() {
-            let token = &token_result.as_ref()?.data;
-            match token {
+            match &token_result.as_ref()?.data {
                 Token::OpeningParenthesis => {
                     self.tokens.next();
-
-                    let mut arguments = vec![];
+                    let mut args = vec![];
                     if let Some(token_result) = self.tokens.peek() {
                         if !matches!(token_result.as_ref()?.data, Token::ClosingParenthesis) {
-                            arguments.push(self.expression()?);
+                            args.push(self.expression()?);
                             while let Some(token_result) = self.tokens.peek() {
-                                if let (Token::ClosingParenthesis, _, _) = token_result.as_ref()?.as_tuple()
-                                {
+                                if token_result.as_ref()?.data == Token::ClosingParenthesis {
                                     break;
                                 };
                                 self.expect(Token::Comma)?;
-                                arguments.push(self.expression()?);
+                                args.push(self.expression()?);
                             }
                         }
                     }
-                    let ((), _, end) = self.expect(Token::ClosingParenthesis)?.into_tuple();
-                    let start = primary.start;
+                    let end = self.expect(Token::ClosingParenthesis)?.end;
+                    let start = expr.start;
 
-                    primary = Ranged::new(
+                    expr = Ranged::new(
                         Expression::Application {
-                            expr: Box::new(primary),
-                            arguments,
+                            expr: Box::new(expr),
+                            args,
                         },
                         start,
                         end,
@@ -226,15 +224,22 @@ impl<'tokens> Parser<'tokens> {
                 Token::Dot => {
                     self.tokens.next();
                     let what = self.expect_ident()?;
-                    let start = primary.start;
+                    let start = expr.start;
                     let end = what.end;
-                    primary = Ranged::new(Expression::Access { from: Box::new(primary), what }, start, end)
+                    expr = Ranged::new(
+                        Expression::Access {
+                            from: Box::new(expr),
+                            what,
+                        },
+                        start,
+                        end,
+                    );
                 }
-                _ => break
+                _ => break,
             }
         }
 
-        Ok(primary)
+        Ok(expr)
     }
 
     fn binary(&mut self, min_prec: usize) -> ParseResult<Expression> {
@@ -286,25 +291,24 @@ impl<'tokens> Parser<'tokens> {
 
         match self.tokens.next() {
             Some(token_result) => {
-                let (_, start, _) = token_result?.into_tuple();
+                let start = token_result?.start;
                 Err(Ranged::new(ParseError::Unconsumed, start, 0))
             }
             None => Ok(Ranged::new(expr, start, end)),
         }
     }
 
-    pub fn parse_module(&mut self) -> ParseResult<Vec<(String, Ranged<Expression>)>> {
+    pub fn parse_module(
+        &mut self,
+    ) -> Result<Vec<(String, Ranged<Expression>)>, Ranged<ParseError>> {
         let mut definitions = vec![];
-        while let Some(token_result) = self.tokens.next() {
-            let (token, start, end) = token_result?.into_tuple();
-            let Token::Identifier(name) = token else {
-                return Err(Ranged::new(ParseError::UnexpectedToken(token), start, end));
-            };
+        while self.tokens.peek().is_some() {
+            let name = self.expect_ident()?.data;
             self.expect(Token::Equals)?;
-            definitions.push((name, self.expression()?))
+            definitions.push((name, self.expression()?));
         }
 
-        Ok(Ranged::new(definitions, 0, 0))
+        Ok(definitions)
     }
 }
 
@@ -347,18 +351,18 @@ pub enum Expression {
         rexpr: Box<Ranged<Expression>>,
     },
     Function {
-        arguments: Vec<Ranged<Pattern>>,
+        args: Vec<Ranged<Pattern>>,
         expr: Box<Ranged<Expression>>,
     },
     Application {
         expr: Box<Ranged<Expression>>,
-        arguments: Vec<Ranged<Expression>>,
+        args: Vec<Ranged<Expression>>,
     },
     Access {
         from: Box<Ranged<Expression>>,
         what: Ranged<String>,
     },
-    Import(Vec<String>)
+    Import(Vec<String>),
 }
 
 #[derive(Clone, Debug)]

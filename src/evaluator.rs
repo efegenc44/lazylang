@@ -1,7 +1,9 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
-    parser::{BinaryOp, Expression, Parser, Pattern}, ranged::Ranged, tokens::Tokens
+    parser::{BinaryOp, Expression, Parser, Pattern},
+    ranged::Ranged,
+    tokens::Tokens,
 };
 
 pub struct Evaluator {
@@ -13,8 +15,15 @@ impl Evaluator {
         Self { locals: vec![] }
     }
 
-    fn resolve_ident(&self, expected: &str, start: usize, end: usize, module: &Module) -> EvaluationResult<Value> {
-        let result = self.locals
+    fn resolve_ident(
+        &self,
+        expected: &str,
+        start: usize,
+        end: usize,
+        module: &Module,
+    ) -> EvaluationResult<Value> {
+        let result = self
+            .locals
             .iter()
             .rev()
             .find(|(ident, _)| ident == expected)
@@ -26,13 +35,11 @@ impl Evaluator {
 
         match module.map.borrow().get(expected) {
             Some(value) => Ok(value.clone()),
-            None => {
-                Err(Ranged::new(
-                    EvaluationError::UnboundIdentifier(expected.to_string()),
-                    start,
-                    end,
-                ))
-            },
+            None => Err(Ranged::new(
+                EvaluationError::UnboundIdentifier(expected.to_string()),
+                start,
+                end,
+            )),
         }
     }
 
@@ -79,7 +86,7 @@ impl Evaluator {
         lhs: &Ranged<Expression>,
         rhs: &Ranged<Expression>,
         bop: BinaryOp,
-        module: &Module
+        module: &Module,
     ) -> EvaluationResult<Value> {
         let (lvalue, rvalue) = (self.eval_expr(lhs, module)?, self.eval_expr(rhs, module)?);
 
@@ -122,7 +129,7 @@ impl Evaluator {
         pattern: &Ranged<Pattern>,
         vexpr: &Ranged<Expression>,
         rexpr: &Ranged<Expression>,
-        module: &Module
+        module: &Module,
     ) -> EvaluationResult<Value> {
         let value = self.eval_expr(vexpr, module)?;
         let true = Self::check_pattern(pattern, &value) else {
@@ -139,7 +146,7 @@ impl Evaluator {
         &mut self,
         expr: &Ranged<Expression>,
         arguments: &[Ranged<Expression>],
-        module: &Module
+        module: &Module,
     ) -> EvaluationResult<Value> {
         let Value::Function { closure, arguments: farguments, expr: fexpr, module: func_module } = self.eval_expr(expr, module)? else {
             return Err(Ranged::new(EvaluationError::ExpectedFunction, expr.start, expr.end))
@@ -167,19 +174,23 @@ impl Evaluator {
         result
     }
 
-
     fn eval_import(&mut self, parts: &[String], _module: &Module) -> EvaluationResult<Value> {
         let file_path = parts.join("/") + ".txt";
         let file = match std::fs::read_to_string(&file_path) {
             Ok(value) => value,
-            Err(_) => panic!()
+            Err(_) => panic!(),
         };
         let tokens = Tokens::new(&file);
-        let module = Parser::new(tokens).parse_module().unwrap().data;
+        let module = Parser::new(tokens).parse_module().unwrap();
         Ok(Value::Module(self.eval_module(file_path, &module)?))
     }
 
-    fn eval_access(&mut self, from: &Ranged<Expression>, what: &Ranged<String>, module: &Module) -> EvaluationResult<Value> {
+    fn eval_access(
+        &mut self,
+        from: &Ranged<Expression>,
+        what: &Ranged<String>,
+        module: &Module,
+    ) -> EvaluationResult<Value> {
         let from = self.eval_expr(from, module)?;
 
         let Value::Module(module) = from else {
@@ -194,9 +205,15 @@ impl Evaluator {
         Ok(value.clone())
     }
 
-    pub fn eval_expr(&mut self, expr: &Ranged<Expression>, module: &Module) -> EvaluationResult<Value> {
+    pub fn eval_expr(
+        &mut self,
+        expr: &Ranged<Expression>,
+        module: &Module,
+    ) -> EvaluationResult<Value> {
         match &expr.data {
-            Expression::Identifier(ident) => Ok(self.resolve_ident(ident, expr.start, expr.end, module)?),
+            Expression::Identifier(ident) => {
+                Ok(self.resolve_ident(ident, expr.start, expr.end, module)?)
+            }
             Expression::NaturalNumber(nat) => Ok(Value::Integer(nat.parse().unwrap())),
             Expression::Binary { lhs, rhs, bop } => self.eval_binary(lhs, rhs, *bop, module),
             Expression::Let {
@@ -204,19 +221,29 @@ impl Evaluator {
                 vexpr,
                 rexpr,
             } => self.eval_let(pattern, vexpr, rexpr, module),
-            Expression::Function { arguments, expr } => Ok(Value::Function {
+            Expression::Function {
+                args: arguments,
+                expr,
+            } => Ok(Value::Function {
                 closure: self.locals.clone(),
                 arguments: arguments.clone(),
                 expr: *expr.clone(),
-                module: module.clone()
+                module: module.clone(),
             }),
-            Expression::Application { expr, arguments } => self.eval_application(expr, arguments, module),
+            Expression::Application {
+                expr,
+                args: arguments,
+            } => self.eval_application(expr, arguments, module),
             Expression::Import(parts) => self.eval_import(parts, module),
             Expression::Access { from, what } => self.eval_access(from, what, module),
         }
     }
 
-    fn eval_module(&mut self, source: String, definitions: &[(String, Ranged<Expression>)]) -> EvaluationResult<Module> {
+    fn eval_module(
+        &mut self,
+        source: String,
+        definitions: &[(String, Ranged<Expression>)],
+    ) -> EvaluationResult<Module> {
         let module = Module {
             source,
             map: Default::default(),
@@ -230,10 +257,18 @@ impl Evaluator {
         Ok(module)
     }
 
-    pub fn eval_main(&mut self, source: String, definitions: &[(String, Ranged<Expression>)]) -> EvaluationResult<Value> {
+    pub fn eval_main(
+        &mut self,
+        source: String,
+        definitions: &[(String, Ranged<Expression>)],
+    ) -> EvaluationResult<Value> {
         let module = self.eval_module(source, definitions)?;
 
-        let main = module.map.borrow_mut().remove(&String::from("main")).expect("Symbol main is not provided.");
+        let main = module
+            .map
+            .borrow_mut()
+            .remove(&String::from("main"))
+            .expect("Symbol main is not provided.");
         let Value::Function { closure: _, arguments: _, expr, module: func_module } = main else {
             panic!("main is not function");
         };
@@ -256,7 +291,7 @@ type EvaluationResult<T> = Result<T, Ranged<EvaluationError>>;
 #[derive(Clone)]
 pub struct Module {
     pub source: String,
-    pub map: Rc<RefCell<HashMap<String, Value>>>
+    pub map: Rc<RefCell<HashMap<String, Value>>>,
 }
 
 #[derive(Clone)]
@@ -270,9 +305,9 @@ pub enum Value {
         closure: Vec<(String, Value)>,
         arguments: Vec<Ranged<Pattern>>,
         expr: Ranged<Expression>,
-        module: Module
+        module: Module,
     },
-    Module(Module)
+    Module(Module),
 }
 
 impl std::fmt::Display for Value {
