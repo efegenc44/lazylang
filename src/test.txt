@@ -1,0 +1,4 @@
+test2 = import src.test2
+
+main = fun()
+    1 + test2.a

@@ -39,6 +39,7 @@ impl<'source> Tokens<'source> {
             "let" => Token::LetKeyword,
             "in" => Token::InKeyword,
             "fun" => Token::FunKeyword,
+            "import" => Token::ImportKeyword,
             _ => Token::Identifier(symbol),
         }
     }
@@ -74,6 +75,7 @@ impl Iterator for Tokens<'_> {
             ':' => Token::Colon,
             ',' => Token::Comma,
             '+' => Token::Plus,
+            '.' => Token::Dot,
             _ => {
                 return Some(Err(Ranged::new(
                     TokenError::UnknownStartOfAToken(ch),
@@ -98,9 +100,11 @@ pub enum Token {
     Colon,
     Comma,
     Plus,
+    Dot,
     LetKeyword,
     InKeyword,
     FunKeyword,
+    ImportKeyword,
 }
 
 #[derive(Clone, Debug)]
