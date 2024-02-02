@@ -1,10 +1,12 @@
 use std::{
+    collections::HashMap,
     env::args,
     fs,
     io::{self, Write},
 };
 
-use evaluator::{Evaluator, Module};
+use evaluator::Evaluator;
+use value::Value;
 
 use crate::{parser::Parser, tokens::Tokens};
 
@@ -12,6 +14,7 @@ mod evaluator;
 mod parser;
 mod ranged;
 mod tokens;
+mod value;
 
 fn main() -> io::Result<()> {
     match &args().collect::<Vec<_>>()[1..] {
@@ -38,10 +41,7 @@ fn repl() -> io::Result<()> {
 
     let mut stdout = io::stdout();
     let stdin = io::stdin();
-    let module = Module {
-        source: String::from(""),
-        map: Default::default(),
-    };
+    let module = Value::new_module(String::new(), HashMap::with_capacity(0));
     loop {
         print!("> ");
         stdout.flush()?;

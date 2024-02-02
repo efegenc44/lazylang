@@ -114,8 +114,8 @@ impl<'tokens> Parser<'tokens> {
         Ok(Ranged::new(
             Expression::Let {
                 pattern,
-                vexpr: value_expr,
-                rexpr: return_expr,
+                value_expr,
+                return_expr,
             },
             start,
             end,
@@ -347,8 +347,8 @@ pub enum Expression {
     },
     Let {
         pattern: Ranged<Pattern>,
-        vexpr: Box<Ranged<Expression>>,
-        rexpr: Box<Ranged<Expression>>,
+        value_expr: Box<Ranged<Expression>>,
+        return_expr: Box<Ranged<Expression>>,
     },
     Function {
         args: Vec<Ranged<Pattern>>,

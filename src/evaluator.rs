@@ -1,9 +1,10 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::collections::HashMap;
 
 use crate::{
     parser::{BinaryOp, Expression, Parser, Pattern},
     ranged::Ranged,
     tokens::Tokens,
+    value::{Module, Value},
 };
 
 pub struct Evaluator {
@@ -33,32 +34,40 @@ impl Evaluator {
             return Ok(value);
         }
 
-        match module.map.borrow().get(expected) {
-            Some(value) => Ok(value.clone()),
-            None => Err(Ranged::new(
-                EvaluationError::UnboundIdentifier(expected.to_string()),
-                start,
-                end,
-            )),
-        }
+        module.borrow().map.get(expected).map_or_else(
+            || {
+                Err(Ranged::new(
+                    EvaluationError::UnboundIdentifier(expected.to_string()),
+                    start,
+                    end,
+                ))
+            },
+            |value| Ok(value.clone()),
+        )
     }
 
-    fn check_pattern(pattern: &Ranged<Pattern>, value: &Value) -> bool {
+    fn check_pattern(pattern: &Ranged<Pattern>, value: &Value) -> EvaluationResult<()> {
         match (&pattern.data, value) {
-            (Pattern::NaturalNumber(nat), Value::Integer(int)) => {
-                &nat.parse::<isize>().unwrap() == int
+            (Pattern::NaturalNumber(nat), Value::Integer(int)) => (&nat.parse::<isize>().unwrap()
+                == int)
+                .then_some(())
+                .ok_or_else(|| {
+                    Ranged::new(
+                        EvaluationError::UnmatchedPattern,
+                        pattern.start,
+                        pattern.end,
+                    )
+                }),
+            (Pattern::Pair { first, second }, Value::Pair(pair)) => {
+                Self::check_pattern(first, &pair.first)?;
+                Self::check_pattern(second, &pair.second)
             }
-            (
-                Pattern::Pair { first, second },
-                Value::Pair {
-                    first: first_value,
-                    second: second_value,
-                },
-            ) => {
-                Self::check_pattern(first, first_value) && Self::check_pattern(second, second_value)
-            }
-            (Pattern::All(_), _) => true,
-            _ => false,
+            (Pattern::All(_), _) => Ok(()),
+            _ => Err(Ranged::new(
+                EvaluationError::UnmatchedPattern,
+                pattern.start,
+                pattern.end,
+            )),
         }
     }
 
@@ -67,15 +76,9 @@ impl Evaluator {
             (Pattern::All(ident), value) => {
                 self.locals.push((ident.clone(), value));
             }
-            (
-                Pattern::Pair { first, second },
-                Value::Pair {
-                    first: first_value,
-                    second: second_value,
-                },
-            ) => {
-                self.define_pattern_locals(first, *first_value);
-                self.define_pattern_locals(second, *second_value);
+            (Pattern::Pair { first, second }, Value::Pair(pair)) => {
+                self.define_pattern_locals(first, *pair.first.clone());
+                self.define_pattern_locals(second, *pair.second.clone());
             }
             _ => (),
         }
@@ -88,12 +91,13 @@ impl Evaluator {
         bop: BinaryOp,
         module: &Module,
     ) -> EvaluationResult<Value> {
-        let (lvalue, rvalue) = (self.eval_expr(lhs, module)?, self.eval_expr(rhs, module)?);
+        let (left_value, right_value) =
+            (self.eval_expr(lhs, module)?, self.eval_expr(rhs, module)?);
 
         Ok(match bop {
             BinaryOp::Addition => {
-                let (lhs, rhs) = match (lvalue, rvalue) {
-                    (Value::Integer(lint), Value::Integer(rint)) => (lint, rint),
+                let (lhs, rhs) = match (left_value, right_value) {
+                    (Value::Integer(left_int), Value::Integer(right_int)) => (left_int, right_int),
                     _ => {
                         return Err(Ranged::new(
                             EvaluationError::ExpectedNumbers,
@@ -105,8 +109,8 @@ impl Evaluator {
                 Value::Integer(lhs + rhs)
             }
             BinaryOp::Multiplication => {
-                let (lhs, rhs) = match (lvalue, rvalue) {
-                    (Value::Integer(lint), Value::Integer(rint)) => (lint, rint),
+                let (lhs, rhs) = match (left_value, right_value) {
+                    (Value::Integer(left_int), Value::Integer(right_int)) => (left_int, right_int),
                     _ => {
                         return Err(Ranged::new(
                             EvaluationError::ExpectedNumbers,
@@ -117,27 +121,22 @@ impl Evaluator {
                 };
                 Value::Integer(lhs * rhs)
             }
-            BinaryOp::Pairing => Value::Pair {
-                first: Box::new(lvalue),
-                second: Box::new(rvalue),
-            },
+            BinaryOp::Pairing => Value::new_pair_value(left_value, right_value),
         })
     }
 
     fn eval_let(
         &mut self,
         pattern: &Ranged<Pattern>,
-        vexpr: &Ranged<Expression>,
-        rexpr: &Ranged<Expression>,
+        value_expr: &Ranged<Expression>,
+        return_expr: &Ranged<Expression>,
         module: &Module,
     ) -> EvaluationResult<Value> {
-        let value = self.eval_expr(vexpr, module)?;
-        let true = Self::check_pattern(pattern, &value) else {
-            return Err(Ranged::new(EvaluationError::UnmatchedPattern, pattern.start, pattern.end))
-        };
+        let value = self.eval_expr(value_expr, module)?;
+        Self::check_pattern(pattern, &value)?;
         let local_len = self.locals.len();
         self.define_pattern_locals(pattern, value);
-        let result = self.eval_expr(rexpr, module);
+        let result = self.eval_expr(return_expr, module);
         self.locals.truncate(local_len);
         result
     }
@@ -148,11 +147,11 @@ impl Evaluator {
         arguments: &[Ranged<Expression>],
         module: &Module,
     ) -> EvaluationResult<Value> {
-        let Value::Function { closure, arguments: farguments, expr: fexpr, module: func_module } = self.eval_expr(expr, module)? else {
+        let Value::Lambda(lambda) = self.eval_expr(expr, module)? else {
             return Err(Ranged::new(EvaluationError::ExpectedFunction, expr.start, expr.end))
         };
 
-        if arguments.len() != farguments.len() {
+        if arguments.len() != lambda.args.len() {
             return Err(Ranged::new(
                 EvaluationError::ArityMismatch,
                 expr.start,
@@ -161,15 +160,13 @@ impl Evaluator {
         }
 
         let local_len = self.locals.len();
-        self.locals.extend(closure);
-        for (argument, pattern) in arguments.iter().zip(farguments) {
-            let value = self.eval_expr(argument, &func_module)?;
-            let true = Self::check_pattern(&pattern, &value) else {
-                return Err(Ranged::new(EvaluationError::UnmatchedPattern, pattern.start, pattern.end))
-            };
-            self.define_pattern_locals(&pattern, value);
+        self.locals.extend(lambda.captures.clone());
+        for (argument, pattern) in arguments.iter().zip(&lambda.args) {
+            let value = self.eval_expr(argument, &lambda.module)?;
+            Self::check_pattern(pattern, &value)?;
+            self.define_pattern_locals(pattern, value);
         }
-        let result = self.eval_expr(&fexpr, &func_module);
+        let result = self.eval_expr(&lambda.expr, &lambda.module);
         self.locals.truncate(local_len);
         result
     }
@@ -197,7 +194,7 @@ impl Evaluator {
             panic!()
         };
 
-        let map = module.map.borrow();
+        let map = &module.borrow().map;
         let Some(value) = map.get(&what.data) else {
             panic!()
         };
@@ -218,22 +215,16 @@ impl Evaluator {
             Expression::Binary { lhs, rhs, bop } => self.eval_binary(lhs, rhs, *bop, module),
             Expression::Let {
                 pattern,
-                vexpr,
-                rexpr,
-            } => self.eval_let(pattern, vexpr, rexpr, module),
-            Expression::Function {
-                args: arguments,
-                expr,
-            } => Ok(Value::Function {
-                closure: self.locals.clone(),
-                arguments: arguments.clone(),
-                expr: *expr.clone(),
-                module: module.clone(),
-            }),
-            Expression::Application {
-                expr,
-                args: arguments,
-            } => self.eval_application(expr, arguments, module),
+                value_expr,
+                return_expr,
+            } => self.eval_let(pattern, value_expr, return_expr, module),
+            Expression::Function { args, expr } => Ok(Value::new_lambda_value(
+                self.locals.clone(),
+                args.clone(),
+                *expr.clone(),
+                module.clone(),
+            )),
+            Expression::Application { expr, args } => self.eval_application(expr, args, module),
             Expression::Import(parts) => self.eval_import(parts, module),
             Expression::Access { from, what } => self.eval_access(from, what, module),
         }
@@ -244,14 +235,11 @@ impl Evaluator {
         source: String,
         definitions: &[(String, Ranged<Expression>)],
     ) -> EvaluationResult<Module> {
-        let module = Module {
-            source,
-            map: Default::default(),
-        };
+        let module = Value::new_module(source, HashMap::default());
 
         for (name, expr) in definitions {
             let value = self.eval_expr(expr, &module)?;
-            module.map.borrow_mut().insert(name.clone(), value);
+            module.borrow_mut().map.insert(name.clone(), value);
         }
 
         Ok(module)
@@ -265,15 +253,15 @@ impl Evaluator {
         let module = self.eval_module(source, definitions)?;
 
         let main = module
-            .map
             .borrow_mut()
+            .map
             .remove(&String::from("main"))
             .expect("Symbol main is not provided.");
-        let Value::Function { closure: _, arguments: _, expr, module: func_module } = main else {
+        let Value::Lambda(lambda) = main else {
             panic!("main is not function");
         };
 
-        self.eval_expr(&expr, &func_module)
+        self.eval_expr(&lambda.expr, &lambda.module)
     }
 }
 
@@ -287,36 +275,3 @@ pub enum EvaluationError {
 }
 
 type EvaluationResult<T> = Result<T, Ranged<EvaluationError>>;
-
-#[derive(Clone)]
-pub struct Module {
-    pub source: String,
-    pub map: Rc<RefCell<HashMap<String, Value>>>,
-}
-
-#[derive(Clone)]
-pub enum Value {
-    Integer(isize),
-    Pair {
-        first: Box<Value>,
-        second: Box<Value>,
-    },
-    Function {
-        closure: Vec<(String, Value)>,
-        arguments: Vec<Ranged<Pattern>>,
-        expr: Ranged<Expression>,
-        module: Module,
-    },
-    Module(Module),
-}
-
-impl std::fmt::Display for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Integer(int) => write!(f, "{int}"),
-            Self::Pair { first, second } => write!(f, "({first}:{second})"),
-            Self::Function { .. } => write!(f, "<function>"),
-            Self::Module(_) => write!(f, "<module>"),
-        }
-    }
-}
