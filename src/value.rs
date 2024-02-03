@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
@@ -14,14 +15,14 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn new_pair_value(first: Self, second: Self) -> Self {
+    pub fn pair(first: Self, second: Self) -> Self {
         Self::Pair(Rc::new(PairInstance {
             first: Box::new(first),
             second: Box::new(second),
         }))
     }
 
-    pub fn new_lambda_value(
+    pub fn lambda(
         captures: Vec<(String, Self)>,
         args: Vec<Ranged<Pattern>>,
         expr: Ranged<Expression>,
@@ -35,8 +36,13 @@ impl Value {
         }))
     }
 
-    pub fn new_module(source: String, map: HashMap<String, Self>) -> Module {
-        Rc::new(RefCell::new(ModuleInstance { source, map }))
+    pub const fn typ(&self) -> Type {
+        match self {
+            Self::Integer(_) => Type::Integer,
+            Self::Pair(_) => Type::Pair,
+            Self::Lambda(_) => Type::Lambda,
+            Self::Module(_) => Type::Module,
+        }
     }
 }
 
@@ -67,7 +73,33 @@ pub type Lambda = Rc<LambdaInstance>;
 
 #[derive(Clone)]
 pub struct ModuleInstance {
-    pub source: String,
+    pub source_name: String,
     pub map: HashMap<String, Value>,
 }
 pub type Module = Rc<RefCell<ModuleInstance>>;
+
+pub fn new_module(source: String, map: HashMap<String, Value>) -> Module {
+    Rc::new(RefCell::new(ModuleInstance {
+        source_name: source,
+        map,
+    }))
+}
+
+#[derive(Debug)]
+pub enum Type {
+    Integer,
+    Pair,
+    Lambda,
+    Module,
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Integer => write!(f, "Integer"),
+            Self::Pair => write!(f, "Pair"),
+            Self::Lambda => write!(f, "Lambda"),
+            Self::Module => write!(f, "Module"),
+        }
+    }
+}

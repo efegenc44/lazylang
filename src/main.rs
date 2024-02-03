@@ -6,10 +6,10 @@ use std::{
 };
 
 use evaluator::Evaluator;
-use value::Value;
 
 use crate::{parser::Parser, tokens::Tokens};
 
+mod error;
 mod evaluator;
 mod parser;
 mod ranged;
@@ -26,14 +26,20 @@ fn main() -> io::Result<()> {
 fn from_file(file_path: &str) -> io::Result<()> {
     let file = fs::read_to_string(file_path)?;
     let tokens = Tokens::new(&file);
-    let module = Parser::new(tokens).parse_module().unwrap();
-    println!(
-        "{}",
-        Evaluator::new()
-            .eval_main(file_path.to_string(), &module)
-            .unwrap()
-    );
-    Ok(())
+    let module = match Parser::new(tokens).parse_module() {
+        Ok(module) => module,
+        Err(error) => {
+            error.report(file_path)?;
+            return Ok(());
+        }
+    };
+    match Evaluator::new().eval_main(file_path.to_string(), &module) {
+        Ok(value) => {
+            println!("= {value} ");
+            Ok(())
+        }
+        Err(error) => error.report(file_path),
+    }
 }
 
 fn repl() -> io::Result<()> {
@@ -41,7 +47,7 @@ fn repl() -> io::Result<()> {
 
     let mut stdout = io::stdout();
     let stdin = io::stdin();
-    let module = Value::new_module(String::new(), HashMap::with_capacity(0));
+    let module = value::new_module(String::new(), HashMap::with_capacity(0));
     loop {
         print!("> ");
         stdout.flush()?;

@@ -1,28 +1,26 @@
-use std::{
-    iter::{Enumerate, Peekable},
-    str::Chars,
-};
+use std::{fmt, iter::Peekable, str::Chars};
 
 use crate::ranged::Ranged;
 
 pub struct Tokens<'source> {
-    chars: Peekable<Enumerate<Chars<'source>>>,
+    chars: Peekable<Chars<'source>>,
+    col: usize,
+    row: usize,
 }
 
 impl<'source> Tokens<'source> {
     pub fn new(source: &'source str) -> Self {
         Self {
-            chars: source.chars().enumerate().peekable(),
+            chars: source.chars().peekable(),
+            col: 1,
+            row: 1,
         }
-    }
-
-    fn peek_index(&mut self) -> usize {
-        self.chars.peek().map_or(0, |(end, _)| *end)
     }
 
     fn number(&mut self) -> Token {
         let mut number = String::new();
-        while let Some((_, ch)) = self.chars.next_if(|(_, ch)| ch.is_ascii_digit()) {
+        while let Some(ch) = self.chars.next_if(|ch| ch.is_ascii_digit()) {
+            self.col += 1;
             number.push(ch);
         }
 
@@ -31,7 +29,8 @@ impl<'source> Tokens<'source> {
 
     fn symbol(&mut self) -> Token {
         let mut symbol = String::new();
-        while let Some((_, ch)) = self.chars.next_if(|(_, ch)| ch.is_alphanumeric()) {
+        while let Some(ch) = self.chars.next_if(|ch| ch.is_alphanumeric()) {
+            self.col += 1;
             symbol.push(ch);
         }
 
@@ -49,24 +48,40 @@ impl Iterator for Tokens<'_> {
     type Item = Result<Ranged<Token>, Ranged<TokenError>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let Some(&(start, ch)) = self.chars.peek() else {
+        let Some(&ch) = self.chars.peek() else {
             return None;
         };
 
+        let col_start = self.col;
+        let row_start = self.row;
+
         if ch.is_whitespace() {
+            if ch == '\n' {
+                self.col = 1;
+                self.row += 1;
+            } else {
+                self.col += 1;
+            }
             self.chars.next();
             return self.next();
         }
 
         if ch.is_alphabetic() {
-            return Some(Ok(Ranged::new(self.symbol(), start, self.peek_index())));
+            return Some(Ok(Ranged::new(
+                self.symbol(),
+                ((col_start, row_start), (self.col, self.row)),
+            )));
         }
 
         if ch.is_ascii_digit() {
-            return Some(Ok(Ranged::new(self.number(), start, self.peek_index())));
+            return Some(Ok(Ranged::new(
+                self.number(),
+                ((col_start, row_start), (self.col, self.row)),
+            )));
         }
 
         self.chars.next();
+        self.col += 1;
         let token = match ch {
             '(' => Token::OpeningParenthesis,
             ')' => Token::ClosingParenthesis,
@@ -79,13 +94,15 @@ impl Iterator for Tokens<'_> {
             _ => {
                 return Some(Err(Ranged::new(
                     TokenError::UnknownStartOfAToken(ch),
-                    start,
-                    self.peek_index(),
+                    ((col_start, row_start), (self.col, self.row)),
                 )))
             }
         };
 
-        Some(Ok(Ranged::new(token, start, self.peek_index())))
+        Some(Ok(Ranged::new(
+            token,
+            ((col_start, row_start), (self.col, self.row)),
+        )))
     }
 }
 
@@ -110,4 +127,12 @@ pub enum Token {
 #[derive(Clone, Debug)]
 pub enum TokenError {
     UnknownStartOfAToken(char),
+}
+
+impl fmt::Display for TokenError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownStartOfAToken(ch) => write!(f, "`{ch}` is not the start of a token."),
+        }
+    }
 }
