@@ -1,15 +1,15 @@
 use core::fmt;
-use std::{fs, io};
+use std::io;
 
 use crate::ranged::Ranged;
 
 pub fn report<E: fmt::Display>(
     error: &Ranged<E>,
     source_name: &str,
+    source:  &str,
     stage_name: &str,
 ) -> io::Result<()> {
-    let file = fs::read_to_string(source_name)?;
-    let lines = file.lines();
+    let lines = source.lines();
 
     let (col_start, row_start) = error.starts();
     let (col_end, row_end) = error.ends();

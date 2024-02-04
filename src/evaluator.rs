@@ -1,5 +1,5 @@
 use core::fmt;
-use std::{collections::HashMap, io};
+use std::{collections::HashMap, fs, io};
 
 use crate::{
     error,
@@ -376,16 +376,17 @@ impl EvaluationError {
         }
     }
 
-    pub fn report(&self, source_name: &str) -> io::Result<()> {
+    pub fn report(&self, source_name: &str, source: &str) -> io::Result<()> {
         if matches!(&self.error.data, BaseEvaluationError::MainIsNotProvided) {
             todo!()
         }
 
-        error::report(&self.error, source_name, "evaluation")?;
+        error::report(&self.error, source_name, source, "evaluation")?;
 
         if let Some((error, source_name)) = &self.origin {
             eprintln!("      ! | Originates from");
-            error.report(source_name)?;
+            let source = fs::read_to_string(source_name)?;
+            error.report(source_name, &source)?;
         }
 
         Ok(())

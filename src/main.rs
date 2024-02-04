@@ -24,21 +24,18 @@ fn main() -> io::Result<()> {
 }
 
 fn from_file(file_path: &str) -> io::Result<()> {
-    let file = fs::read_to_string(file_path)?;
-    let tokens = Tokens::new(&file);
-    let module = match Parser::new(tokens).parse_module() {
-        Ok(module) => module,
-        Err(error) => {
-            error.report(file_path)?;
-            return Ok(());
-        }
+    let source = fs::read_to_string(file_path)?;
+    let tokens = Tokens::new(&source);
+    let definitions = match Parser::new(tokens).parse_module() {
+        Ok(definitions) => definitions,
+        Err(error) => return error.report(file_path, &source)
     };
-    match Evaluator::new().eval_main(file_path.to_string(), &module) {
+    match Evaluator::new().eval_main(file_path.to_string(), &definitions) {
         Ok(value) => {
-            println!("= {value} ");
+            println!("= {value}");
             Ok(())
-        }
-        Err(error) => error.report(file_path),
+        },
+        Err(error) => error.report(file_path, &source),
     }
 }
 
@@ -68,7 +65,7 @@ fn repl() -> io::Result<()> {
         let expr = match parser.parse_expr() {
             Ok(expr) => expr,
             Err(error) => {
-                println!("{error:?}");
+                error.report("REPL", input)?;
                 continue;
             }
         };
@@ -76,7 +73,7 @@ fn repl() -> io::Result<()> {
         let value = match evaluator.eval_expr(&expr, &module) {
             Ok(value) => value,
             Err(error) => {
-                println!("{error:?}");
+                error.report("REPL", input)?;
                 continue;
             }
         };
