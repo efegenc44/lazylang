@@ -24,90 +24,107 @@ impl<'source> Parser<'source> {
         }
     }
 
+    fn peek_token(&mut self) -> ParseResult<&Token> {
+        Ok(self.tokens.peek()
+            .map(|token_result| token_result.as_ref())
+            .ok_or_else(|| Ranged::new(ParseError::UnexpectedEOF, Default::default()))?
+            .map(Ranged::as_ref)?)
+    }
+
+    fn next_token(&mut self) -> ParseResult<Token> {
+        Ok(self.tokens.next()
+            .ok_or_else(|| Ranged::new(ParseError::UnexpectedEOF, Default::default()))??)
+    }
+
     #[allow(clippy::needless_pass_by_value)]
     fn expect(&mut self, expected: Token) -> ParseResult<()> {
-        match self.tokens.next() {
-            Some(token_result) => {
-                let (token, ranges) = token_result?.into_tuple();
-
-                if token == expected {
-                    Ok(Ranged::new((), ranges))
-                } else {
-                    Err(Ranged::new(ParseError::UnexpectedToken(token), ranges))
-                }
-            }
-            None => Err(Ranged::new(ParseError::UnexpectedEOF, Default::default())),
+        let (token, ranges) = self.next_token()?.into_tuple();
+        if token == expected {
+            Ok(Ranged::new((), ranges))
+        } else {
+            Err(Ranged::new(ParseError::UnexpectedToken(token), ranges))
         }
     }
 
     fn expect_ident(&mut self) -> ParseResult<String> {
-        match self.tokens.next() {
-            Some(token_result) => {
-                let (token, ranges) = token_result?.into_tuple();
-
-                if let Token::Identifier(name) = token {
-                    Ok(Ranged::new(name, ranges))
-                } else {
-                    Err(Ranged::new(ParseError::UnexpectedToken(token), ranges))
-                }
-            }
-            None => Err(Ranged::new(ParseError::UnexpectedEOF, Default::default())),
+        let (token, ranges) = self.next_token()?.into_tuple();
+        if let Token::Identifier(name) = token {
+            Ok(Ranged::new(name, ranges))
+        } else {
+            Err(Ranged::new(ParseError::UnexpectedToken(token), ranges))
         }
     }
 
+    fn optional(&mut self, optional: Token) -> bool {
+        match self.peek_token().map(|token| token.data) {
+            Ok(token) => token == &optional,
+            Err(_) => false,
+        }
+    }
+
+    fn parse_pattern_grouping(&mut self) -> ParseResult<Pattern> {
+        let starts = self.expect(Token::OpeningParenthesis).unwrap().starts();
+        let pattern = self.pattern()?.data;
+        let ends = self.expect(Token::ClosingParenthesis)?.ends();
+
+        Ok(Ranged::new(pattern, (starts, ends)))
+    }
+
     fn primary_pattern(&mut self) -> ParseResult<Pattern> {
-        let Some(token_result) = self.tokens.next() else {
-            return Err(Ranged::new(ParseError::UnexpectedEOF, Default::default()));
-        };
-
-        let (token, ranges) = token_result?.into_tuple();
-
-        match token {
-            Token::Identifier(ident) => Ok(Ranged::new(Pattern::All(ident), ranges)),
-            Token::NaturalNumber(nat) => Ok(Ranged::new(Pattern::NaturalNumber(nat), ranges)),
-            Token::OpeningParenthesis => {
-                let pattern = self.pattern()?;
-                let ends = self.expect(Token::ClosingParenthesis)?.ends();
-                Ok(Ranged::new(pattern.data, (ranges.0, ends)))
+        match self.peek_token()?.data {
+            Token::OpeningParenthesis => self.parse_pattern_grouping(),
+            _ => {
+                let (token, ranges) = self.tokens.next().unwrap().unwrap().into_tuple();
+                match token {
+                    Token::Identifier(ident) => Ok(Ranged::new(Pattern::All(ident), ranges)),
+                    Token::NaturalNumber(nat) => Ok(Ranged::new(Pattern::NaturalNumber(nat), ranges)),
+                    unexpected => Err(Ranged::new(ParseError::UnexpectedToken(unexpected), ranges)),
+                }
             }
-            unexpected => Err(Ranged::new(ParseError::UnexpectedToken(unexpected), ranges)),
         }
     }
 
     fn pair_pattern(&mut self) -> ParseResult<Pattern> {
         let primary = self.primary_pattern()?;
 
-        if let Some(token_result) = self.tokens.peek() {
-            let Token::Colon = token_result.as_ref()?.data else {
-                return Ok(primary);
-            };
+        if self.optional(Token::Colon) {
             self.tokens.next();
             let second = self.pair_pattern()?;
             let starts = primary.starts();
             let ends = second.ends();
-            return Ok(Ranged::new(
+            Ok(Ranged::new(
                 Pattern::Pair {
                     first: Box::new(primary),
                     second: Box::new(second),
                 },
                 (starts, ends),
-            ));
+            ))
+        } else {
+            Ok(primary)
         }
-
-        Ok(primary)
     }
 
     fn pattern(&mut self) -> ParseResult<Pattern> {
         self.pair_pattern()
     }
 
-    fn parse_let(&mut self, starts: (usize, usize)) -> ParseResult<Expression> {
+    fn parse_grouping(&mut self) -> ParseResult<Expression> {
+        let starts = self.expect(Token::OpeningParenthesis).unwrap().starts();
+        let expr = self.expression()?.data;
+        let ends = self.expect(Token::ClosingParenthesis)?.ends();
+
+        Ok(Ranged::new(expr, (starts, ends)))
+    }
+
+    fn parse_let(&mut self) -> ParseResult<Expression> {
+        let starts = self.expect(Token::LetKeyword).unwrap().starts();
         let pattern = self.pattern()?;
         self.expect(Token::Equals)?;
         let value_expr = Box::new(self.expression()?);
         self.expect(Token::InKeyword)?;
         let return_expr = Box::new(self.expression()?);
         let ends = return_expr.ends();
+
         Ok(Ranged::new(
             Expression::Let {
                 pattern,
@@ -118,19 +135,15 @@ impl<'source> Parser<'source> {
         ))
     }
 
-    fn parse_lambda(&mut self, starts: (usize, usize)) -> ParseResult<Expression> {
+    fn parse_lambda(&mut self) -> ParseResult<Expression> {
+        let starts = self.expect(Token::FunKeyword).unwrap().starts();
         self.expect(Token::OpeningParenthesis)?;
         let mut args = vec![];
-        if let Some(token_result) = self.tokens.peek() {
-            if !matches!(token_result.as_ref()?.data, Token::ClosingParenthesis) {
+        if !self.optional(Token::ClosingParenthesis) {
+            args.push(self.pattern()?);
+            while !self.optional(Token::ClosingParenthesis) {
+                self.expect(Token::Comma)?;
                 args.push(self.pattern()?);
-                while let Some(token_result) = self.tokens.peek() {
-                    if token_result.as_ref()?.data == Token::ClosingParenthesis {
-                        break;
-                    };
-                    self.expect(Token::Comma)?;
-                    args.push(self.pattern()?);
-                }
             }
         }
         self.expect(Token::ClosingParenthesis)?;
@@ -143,14 +156,12 @@ impl<'source> Parser<'source> {
         ))
     }
 
-    fn parse_import(&mut self, starts: (usize, usize)) -> ParseResult<Expression> {
+    fn parse_import(&mut self) -> ParseResult<Expression> {
+        let starts = self.expect(Token::ImportKeyword).unwrap().starts();
         let part = self.expect_ident()?;
         let mut ends = part.ends();
         let mut parts = vec![part.data];
-        while let Some(token_result) = self.tokens.peek() {
-            let Token::Dot = token_result.as_ref()?.data else {
-                break
-            };
+        while self.optional(Token::Dot) {
             self.tokens.next();
             let part = self.expect_ident()?;
             ends = part.ends();
@@ -161,24 +172,19 @@ impl<'source> Parser<'source> {
     }
 
     fn primary(&mut self) -> ParseResult<Expression> {
-        let Some(token_result) = self.tokens.next() else {
-            return Err(Ranged::new(ParseError::UnexpectedEOF, Default::default()));
-        };
-
-        let (token, ranges) = token_result?.into_tuple();
-
-        match token {
-            Token::Identifier(ident) => Ok(Ranged::new(Expression::Identifier(ident), ranges)),
-            Token::NaturalNumber(nat) => Ok(Ranged::new(Expression::NaturalNumber(nat), ranges)),
-            Token::OpeningParenthesis => {
-                let expr = self.expression()?.data;
-                let ends = self.expect(Token::ClosingParenthesis)?.ends();
-                Ok(Ranged::new(expr, (ranges.0, ends)))
+        match self.peek_token()?.data {
+            Token::OpeningParenthesis => self.parse_grouping(),
+            Token::LetKeyword => self.parse_let(),
+            Token::FunKeyword => self.parse_lambda(),
+            Token::ImportKeyword => self.parse_import(),
+            _ => {
+                let (token, ranges) = self.tokens.next().unwrap().unwrap().into_tuple();
+                match token {
+                    Token::Identifier(ident) => Ok(Ranged::new(Expression::Identifier(ident), ranges)),
+                    Token::NaturalNumber(nat) => Ok(Ranged::new(Expression::NaturalNumber(nat), ranges)),
+                    unexpected => Err(Ranged::new(ParseError::UnexpectedToken(unexpected), ranges)),
+                }
             }
-            Token::LetKeyword => self.parse_let(ranges.0),
-            Token::FunKeyword => self.parse_lambda(ranges.0),
-            Token::ImportKeyword => self.parse_import(ranges.0),
-            unexpected => Err(Ranged::new(ParseError::UnexpectedToken(unexpected), ranges)),
         }
     }
 
@@ -190,16 +196,11 @@ impl<'source> Parser<'source> {
                 Token::OpeningParenthesis => {
                     self.tokens.next();
                     let mut args = vec![];
-                    if let Some(token_result) = self.tokens.peek() {
-                        if !matches!(token_result.as_ref()?.data, Token::ClosingParenthesis) {
+                    if !self.optional(Token::ClosingParenthesis) {
+                        args.push(self.expression()?);
+                        while !self.optional(Token::ClosingParenthesis) {
+                            self.expect(Token::Comma)?;
                             args.push(self.expression()?);
-                            while let Some(token_result) = self.tokens.peek() {
-                                if token_result.as_ref()?.data == Token::ClosingParenthesis {
-                                    break;
-                                };
-                                self.expect(Token::Comma)?;
-                                args.push(self.expression()?);
-                            }
                         }
                     }
                     let starts = expr.starts();
@@ -281,8 +282,7 @@ impl<'source> Parser<'source> {
 
         match self.tokens.next() {
             Some(token_result) => {
-                let starts = token_result?.starts();
-                Err(Ranged::new(ParseError::Unconsumed, (starts, (0, 0))))
+                Err(Ranged::new(ParseError::Unconsumed, token_result?.ranges()))
             }
             None => Ok(Ranged::new(expr, ranges)),
         }
@@ -316,7 +316,7 @@ impl fmt::Display for ParseError {
             Self::UnexpectedEOF => write!(f, "Unexpectedly encountered EOF while parsing."),
             Self::TokenError(error) => write!(f, "{error}"),
             Self::UnexpectedToken(token) => write!(f, "`{token:?}` was not expected."),
-            Self::Unconsumed => write!(f, "Some tokens couldn't be consumed."),
+            Self::Unconsumed => write!(f, "From here, the rest couldn't be consumed."),
         }
     }
 }
@@ -336,10 +336,8 @@ impl From<&Ranged<TokenError>> for Ranged<ParseError> {
 
 impl Ranged<ParseError> {
     pub fn report(&self, source_name: &str) -> io::Result<()> {
-        match self.data {
-            ParseError::UnexpectedEOF => todo!(),
-            ParseError::Unconsumed => todo!(),
-            _ => (),
+        if let ParseError::UnexpectedEOF = self.data {
+            todo!()
         }
 
         error::report(self, source_name, "parsing")

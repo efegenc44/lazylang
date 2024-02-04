@@ -39,4 +39,8 @@ impl<T> Ranged<T> {
         let ranges = self.ranges();
         (self.data, ranges)
     }
+
+    pub const fn as_ref(&self) -> Ranged<&T> {
+        Ranged::new(&self.data, self.ranges())
+    }
 }
