@@ -376,7 +376,7 @@ impl EvaluationError {
         }
     }
 
-    pub fn report(&self, source_name: &str, source: &str) -> io::Result<()> {
+    pub fn report(&self, source_name: &str, source: &str) {
         if matches!(&self.error.data, BaseEvaluationError::MainIsNotProvided) {
             todo!()
         }
@@ -385,11 +385,12 @@ impl EvaluationError {
 
         if let Some((error, source_name)) = &self.origin {
             eprintln!("      ! | Originates from");
-            let source = fs::read_to_string(source_name)?;
-            error.report(source_name, &source)?;
+            let source = match fs::read_to_string(source_name) {
+                Ok(source) => source,
+                Err(error) => return error::report_file_read(&error, source_name),
+            };
+            error.report(source_name, &source);
         }
-
-        Ok(())
     }
 }
 

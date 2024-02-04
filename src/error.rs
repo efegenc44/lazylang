@@ -1,4 +1,5 @@
 use core::fmt;
+use std::io;
 
 use crate::ranged::Ranged;
 
@@ -37,4 +38,11 @@ pub fn report<E: fmt::Display>(
         eprintln!("        | {}", "^".repeat(col_end - 1));
     }
     eprintln!("        | {}\n", error.data);
+}
+
+pub fn report_file_read(error: &io::Error, source_name: &str) {
+    eprintln!();
+    eprintln!("  Error | [{source_name}]",);
+    eprintln!("        |");
+    eprintln!("        | {error}\n");
 }

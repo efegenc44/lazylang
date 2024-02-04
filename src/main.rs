@@ -19,25 +19,25 @@ mod value;
 fn main() -> io::Result<()> {
     match &args().collect::<Vec<_>>()[1..] {
         [] => repl(),
-        [file_path, ..] => from_file(file_path),
+        [file_path, ..] => {
+            from_file(file_path);
+            Ok(())
+        }
     }
 }
 
-fn from_file(file_path: &str) -> io::Result<()> {
-    let source = fs::read_to_string(file_path)?;
+fn from_file(file_path: &str) {
+    let source = match fs::read_to_string(file_path) {
+        Ok(source) => source,
+        Err(error) => return error::report_file_read(&error, file_path),
+    };
     let tokens = Tokens::new(&source);
     let definitions = match Parser::new(tokens).parse_module() {
         Ok(definitions) => definitions,
-        Err(error) => {
-            error.report(file_path, &source);
-            return Ok(());
-        }
+        Err(error) => return error.report(file_path, &source),
     };
     match Evaluator::new().eval_main(file_path.to_string(), &definitions) {
-        Ok(value) => {
-            println!("= {value}");
-            Ok(())
-        }
+        Ok(value) => println!("= {value}"),
         Err(error) => error.report(file_path, &source),
     }
 }
@@ -76,7 +76,7 @@ fn repl() -> io::Result<()> {
         let value = match evaluator.eval_expr(&expr, &module) {
             Ok(value) => value,
             Err(error) => {
-                error.report("REPL", input)?;
+                error.report("REPL", input);
                 continue;
             }
         };
