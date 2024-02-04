@@ -381,7 +381,7 @@ impl EvaluationError {
             todo!()
         }
 
-        error::report(&self.error, source_name, source, "evaluation")?;
+        error::report(&self.error, source_name, source, "evaluation");
 
         if let Some((error, source_name)) = &self.origin {
             eprintln!("      ! | Originates from");

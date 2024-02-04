@@ -1,5 +1,5 @@
 use core::fmt;
-use std::{io, iter::Peekable};
+use std::{iter::Peekable, result};
 
 use crate::{
     error,
@@ -25,14 +25,18 @@ impl<'source> Parser<'source> {
     }
 
     fn peek_token(&mut self) -> ParseResult<&Token> {
-        Ok(self.tokens.peek()
-            .map(|token_result| token_result.as_ref())
+        Ok(self
+            .tokens
+            .peek()
+            .map(result::Result::as_ref)
             .ok_or_else(|| Ranged::new(ParseError::UnexpectedEOF, Default::default()))?
             .map(Ranged::as_ref)?)
     }
 
     fn next_token(&mut self) -> ParseResult<Token> {
-        Ok(self.tokens.next()
+        Ok(self
+            .tokens
+            .next()
             .ok_or_else(|| Ranged::new(ParseError::UnexpectedEOF, Default::default()))??)
     }
 
@@ -55,11 +59,11 @@ impl<'source> Parser<'source> {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     fn optional(&mut self, optional: Token) -> bool {
-        match self.peek_token().map(|token| token.data) {
-            Ok(token) => token == &optional,
-            Err(_) => false,
-        }
+        self.peek_token()
+            .map(|token| token.data)
+            .map_or(false, |token| token == &optional)
     }
 
     fn parse_pattern_grouping(&mut self) -> ParseResult<Pattern> {
@@ -77,7 +81,9 @@ impl<'source> Parser<'source> {
                 let (token, ranges) = self.tokens.next().unwrap().unwrap().into_tuple();
                 match token {
                     Token::Identifier(ident) => Ok(Ranged::new(Pattern::All(ident), ranges)),
-                    Token::NaturalNumber(nat) => Ok(Ranged::new(Pattern::NaturalNumber(nat), ranges)),
+                    Token::NaturalNumber(nat) => {
+                        Ok(Ranged::new(Pattern::NaturalNumber(nat), ranges))
+                    }
                     unexpected => Err(Ranged::new(ParseError::UnexpectedToken(unexpected), ranges)),
                 }
             }
@@ -136,17 +142,16 @@ impl<'source> Parser<'source> {
     }
 
     fn parse_lambda(&mut self) -> ParseResult<Expression> {
-        let starts = self.expect(Token::FunKeyword).unwrap().starts();
-        self.expect(Token::OpeningParenthesis)?;
+        let starts = self.expect(Token::Backslash).unwrap().starts();
         let mut args = vec![];
-        if !self.optional(Token::ClosingParenthesis) {
+        if !self.optional(Token::Arrow) {
             args.push(self.pattern()?);
-            while !self.optional(Token::ClosingParenthesis) {
+            while !self.optional(Token::Arrow) {
                 self.expect(Token::Comma)?;
                 args.push(self.pattern()?);
             }
         }
-        self.expect(Token::ClosingParenthesis)?;
+        self.expect(Token::Arrow)?;
         let expr = Box::new(self.expression()?);
         let ends = expr.ends();
 
@@ -175,13 +180,17 @@ impl<'source> Parser<'source> {
         match self.peek_token()?.data {
             Token::OpeningParenthesis => self.parse_grouping(),
             Token::LetKeyword => self.parse_let(),
-            Token::FunKeyword => self.parse_lambda(),
+            Token::Backslash => self.parse_lambda(),
             Token::ImportKeyword => self.parse_import(),
             _ => {
                 let (token, ranges) = self.tokens.next().unwrap().unwrap().into_tuple();
                 match token {
-                    Token::Identifier(ident) => Ok(Ranged::new(Expression::Identifier(ident), ranges)),
-                    Token::NaturalNumber(nat) => Ok(Ranged::new(Expression::NaturalNumber(nat), ranges)),
+                    Token::Identifier(ident) => {
+                        Ok(Ranged::new(Expression::Identifier(ident), ranges))
+                    }
+                    Token::NaturalNumber(nat) => {
+                        Ok(Ranged::new(Expression::NaturalNumber(nat), ranges))
+                    }
                     unexpected => Err(Ranged::new(ParseError::UnexpectedToken(unexpected), ranges)),
                 }
             }
@@ -281,9 +290,7 @@ impl<'source> Parser<'source> {
         let (expr, ranges) = self.expression()?.into_tuple();
 
         match self.tokens.next() {
-            Some(token_result) => {
-                Err(Ranged::new(ParseError::Unconsumed, token_result?.ranges()))
-            }
+            Some(token_result) => Err(Ranged::new(ParseError::Unconsumed, token_result?.ranges())),
             None => Ok(Ranged::new(expr, ranges)),
         }
     }
@@ -335,12 +342,12 @@ impl From<&Ranged<TokenError>> for Ranged<ParseError> {
 }
 
 impl Ranged<ParseError> {
-    pub fn report(&self, source_name: &str, source: &str) -> io::Result<()> {
-        if let ParseError::UnexpectedEOF = self.data {
+    pub fn report(&self, source_name: &str, source: &str) {
+        if matches!(self.data, ParseError::UnexpectedEOF) {
             todo!()
         }
 
-        error::report(self, source_name, source, "parsing")
+        error::report(self, source_name, source, "parsing");
     }
 }
 

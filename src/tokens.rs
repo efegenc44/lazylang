@@ -37,7 +37,6 @@ impl<'source> Tokens<'source> {
         match symbol.as_str() {
             "let" => Token::LetKeyword,
             "in" => Token::InKeyword,
-            "fun" => Token::FunKeyword,
             "import" => Token::ImportKeyword,
             _ => Token::Identifier(symbol),
         }
@@ -86,7 +85,16 @@ impl Iterator for Tokens<'_> {
             '(' => Token::OpeningParenthesis,
             ')' => Token::ClosingParenthesis,
             '*' => Token::Asterisk,
+            '\\' => Token::Backslash,
             '=' => Token::Equals,
+            '-' => {
+                if self.chars.next_if_eq(&'>').is_some() {
+                    self.col += 1;
+                    Token::Arrow
+                } else {
+                    Token::Minus
+                }
+            }
             ':' => Token::Colon,
             ',' => Token::Comma,
             '+' => Token::Plus,
@@ -112,15 +120,17 @@ pub enum Token {
     NaturalNumber(String),
     OpeningParenthesis,
     ClosingParenthesis,
+    Backslash,
     Asterisk,
     Equals,
+    Arrow,
     Colon,
     Comma,
+    Minus,
     Plus,
     Dot,
     LetKeyword,
     InKeyword,
-    FunKeyword,
     ImportKeyword,
 }
 

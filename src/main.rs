@@ -28,13 +28,16 @@ fn from_file(file_path: &str) -> io::Result<()> {
     let tokens = Tokens::new(&source);
     let definitions = match Parser::new(tokens).parse_module() {
         Ok(definitions) => definitions,
-        Err(error) => return error.report(file_path, &source)
+        Err(error) => {
+            error.report(file_path, &source);
+            return Ok(());
+        }
     };
     match Evaluator::new().eval_main(file_path.to_string(), &definitions) {
         Ok(value) => {
             println!("= {value}");
             Ok(())
-        },
+        }
         Err(error) => error.report(file_path, &source),
     }
 }
@@ -65,7 +68,7 @@ fn repl() -> io::Result<()> {
         let expr = match parser.parse_expr() {
             Ok(expr) => expr,
             Err(error) => {
-                error.report("REPL", input)?;
+                error.report("REPL", input);
                 continue;
             }
         };

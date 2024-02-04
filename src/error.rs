@@ -1,14 +1,13 @@
 use core::fmt;
-use std::io;
 
 use crate::ranged::Ranged;
 
 pub fn report<E: fmt::Display>(
     error: &Ranged<E>,
     source_name: &str,
-    source:  &str,
+    source: &str,
     stage_name: &str,
-) -> io::Result<()> {
+) {
     let lines = source.lines();
 
     let (col_start, row_start) = error.starts();
@@ -38,6 +37,4 @@ pub fn report<E: fmt::Display>(
         eprintln!("        | {}", "^".repeat(col_end - 1));
     }
     eprintln!("        | {}\n", error.data);
-
-    Ok(())
 }
