@@ -73,7 +73,7 @@ fn repl() -> io::Result<()> {
             }
         };
 
-        let value = match evaluator.eval_expr(&expr, &module) {
+        let value = match evaluator.eval_expr_lazy(&expr, &module) {
             Ok(value) => value,
             Err(error) => {
                 error.report("REPL", input);

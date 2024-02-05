@@ -1,3 +1,16 @@
 test2 = import src.test2
 
+first  = \x:xs -> x
+second = \x:xs -> xs
+
+a = \1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:xs -> xs
+
+nothing = \x -> 10
+
+ones = 1:ones
+
+b = first(a(ones))
+
+c = 7
+
 main = test2.foo

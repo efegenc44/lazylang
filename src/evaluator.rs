@@ -46,7 +46,7 @@ impl Evaluator {
         )
     }
 
-    fn check_pattern(pattern: &Ranged<Pattern>, value: &Value) -> EvaluationResult<()> {
+    fn check_pattern(&mut self, pattern: &Ranged<Pattern>, value: &Value) -> EvaluationResult<()> {
         match (&pattern.data, value) {
             (Pattern::NaturalNumber(nat), Value::Integer(int)) => (&nat.parse::<isize>().unwrap()
                 == int)
@@ -58,10 +58,14 @@ impl Evaluator {
                     )
                 }),
             (Pattern::Pair { first, second }, Value::Pair(pair)) => {
-                Self::check_pattern(first, &pair.first)?;
-                Self::check_pattern(second, &pair.second)
+                self.check_pattern(first, &pair.first)?;
+                self.check_pattern(second, &pair.second)
             }
             (Pattern::All(_), _) => Ok(()),
+            (_, Value::Thunk(thunk)) => {
+                let value = self.eval_expr_lazy(&thunk.expr, &thunk.module)?;
+                self.check_pattern(pattern, &value)
+            }
             _ => Err(EvaluationError::basic(
                 BaseEvaluationError::PatternCouldntMatch,
                 pattern.ranges(),
@@ -69,16 +73,25 @@ impl Evaluator {
         }
     }
 
-    fn define_pattern_locals(&mut self, pattern: &Ranged<Pattern>, value: Value) {
+    fn define_pattern_locals(
+        &mut self,
+        pattern: &Ranged<Pattern>,
+        value: Value,
+    ) -> EvaluationResult<()> {
         match (&pattern.data, value) {
             (Pattern::All(ident), value) => {
                 self.locals.push((ident.clone(), value));
+                Ok(())
             }
             (Pattern::Pair { first, second }, Value::Pair(pair)) => {
-                self.define_pattern_locals(first, *pair.first.clone());
-                self.define_pattern_locals(second, *pair.second.clone());
+                self.define_pattern_locals(first, *pair.first.clone())?;
+                self.define_pattern_locals(second, *pair.second.clone())
             }
-            _ => (),
+            (_, Value::Thunk(thunk)) => {
+                let value = self.eval_expr_lazy(&thunk.expr, &thunk.module)?;
+                self.define_pattern_locals(pattern, value)
+            }
+            _ => Ok(()),
         }
     }
 
@@ -89,12 +102,12 @@ impl Evaluator {
         bop: BinaryOp,
         module: &Module,
     ) -> EvaluationResult<Value> {
-        let (left_value, right_value) =
-            (self.eval_expr(lhs, module)?, self.eval_expr(rhs, module)?);
-
         Ok(match bop {
             BinaryOp::Addition => {
-                let (lhs, rhs) = match (left_value, right_value) {
+                let (lhs, rhs) = match (
+                    self.eval_expr_eager(lhs, module)?,
+                    self.eval_expr_eager(rhs, module)?,
+                ) {
                     (Value::Integer(left_int), Value::Integer(right_int)) => (left_int, right_int),
                     (left_value, right_value) => {
                         return Err(EvaluationError::basic(
@@ -109,7 +122,10 @@ impl Evaluator {
                 Value::Integer(lhs + rhs)
             }
             BinaryOp::Multiplication => {
-                let (lhs, rhs) = match (left_value, right_value) {
+                let (lhs, rhs) = match (
+                    self.eval_expr_eager(lhs, module)?,
+                    self.eval_expr_eager(rhs, module)?,
+                ) {
                     (Value::Integer(left_int), Value::Integer(right_int)) => (left_int, right_int),
                     (left_value, right_value) => {
                         return Err(EvaluationError::basic(
@@ -123,7 +139,10 @@ impl Evaluator {
                 };
                 Value::Integer(lhs * rhs)
             }
-            BinaryOp::Pairing => Value::pair(left_value, right_value),
+            BinaryOp::Pairing => Value::pair(
+                self.eval_expr_lazy(lhs, module)?,
+                self.eval_expr_lazy(rhs, module)?,
+            ),
         })
     }
 
@@ -134,11 +153,11 @@ impl Evaluator {
         return_expr: &Ranged<Expression>,
         module: &Module,
     ) -> EvaluationResult<Value> {
-        let value = self.eval_expr(value_expr, module)?;
-        Self::check_pattern(pattern, &value)?;
+        let value = self.eval_expr_lazy(value_expr, module)?;
+        self.check_pattern(pattern, &value)?;
         let local_len = self.locals.len();
-        self.define_pattern_locals(pattern, value);
-        let result = self.eval_expr(return_expr, module);
+        self.define_pattern_locals(pattern, value)?;
+        let result = self.eval_expr_lazy(return_expr, module);
         self.locals.truncate(local_len);
         result
     }
@@ -150,7 +169,7 @@ impl Evaluator {
         ranges: Ranges,
         module: &Module,
     ) -> EvaluationResult<Value> {
-        let value = self.eval_expr(expr, module)?;
+        let value = self.eval_expr_eager(expr, module)?;
         let Value::Lambda(lambda) = value else {
             return Err(EvaluationError::basic(BaseEvaluationError::ExpectedLambda(value.typ()), expr.ranges()));
         };
@@ -168,11 +187,11 @@ impl Evaluator {
         let local_len = self.locals.len();
         self.locals.extend(lambda.captures.clone());
         for (argument, pattern) in args.iter().zip(&lambda.args) {
-            let value = self.eval_expr(argument, &lambda.module)?;
-            Self::check_pattern(pattern, &value)?;
-            self.define_pattern_locals(pattern, value);
+            let value = self.eval_expr_lazy(argument, &lambda.module)?;
+            self.check_pattern(pattern, &value)?;
+            self.define_pattern_locals(pattern, value)?;
         }
-        let result = self.eval_expr(&lambda.expr, &lambda.module);
+        let result = self.eval_expr_lazy(&lambda.expr, &lambda.module);
         self.locals.truncate(local_len);
 
         result.map_err(|error| {
@@ -184,12 +203,7 @@ impl Evaluator {
         })
     }
 
-    fn eval_import(
-        &mut self,
-        parts: &[String],
-        ranges: Ranges,
-        _module: &Module,
-    ) -> EvaluationResult<Value> {
+    fn eval_import(parts: &[String], ranges: Ranges) -> EvaluationResult<Value> {
         let file_path = parts.join("/") + ".txt";
         let file = std::fs::read_to_string(&file_path)
             .map_err(|error| EvaluationError::basic(BaseEvaluationError::IOError(error), ranges))?;
@@ -208,7 +222,7 @@ impl Evaluator {
                 ),
             )
         })?;
-        Ok(Value::Module(self.eval_module(file_path, &definitions)?))
+        Ok(Value::Module(Self::eval_module(file_path, &definitions)))
     }
 
     fn eval_access(
@@ -217,7 +231,7 @@ impl Evaluator {
         what: &Ranged<String>,
         module: &Module,
     ) -> EvaluationResult<Value> {
-        let from_value = self.eval_expr(from, module)?;
+        let from_value = self.eval_expr_eager(from, module)?;
 
         let Value::Module(module) = from_value else {
             return Err(EvaluationError::basic(BaseEvaluationError::ExpectedModule(from_value.typ()), from.ranges()));
@@ -231,15 +245,13 @@ impl Evaluator {
         Ok(value.clone())
     }
 
-    pub fn eval_expr(
+    pub fn eval_expr_lazy(
         &mut self,
         expr: &Ranged<Expression>,
         module: &Module,
     ) -> EvaluationResult<Value> {
         match &expr.data {
-            Expression::Identifier(ident) => {
-                Ok(self.resolve_ident(ident, expr.ranges(), module)?)
-            }
+            Expression::Identifier(ident) => self.resolve_ident(ident, expr.ranges(), module),
             Expression::NaturalNumber(nat) => Ok(Value::Integer(nat.parse().unwrap())),
             Expression::Binary { lhs, rhs, bop } => self.eval_binary(lhs, rhs, *bop, module),
             Expression::Let {
@@ -257,24 +269,51 @@ impl Evaluator {
                 expr: lambda_expr,
                 args,
             } => self.eval_application(lambda_expr, args, expr.ranges(), module),
-            Expression::Import(parts) => self.eval_import(parts, expr.ranges(), module),
+            Expression::Import(parts) => Self::eval_import(parts, expr.ranges()),
             Expression::Access { from, what } => self.eval_access(from, what, module),
         }
     }
 
-    fn eval_module(
+    pub fn eval_expr_eager(
         &mut self,
-        source_name: String,
-        definitions: &[(String, Ranged<Expression>)],
-    ) -> EvaluationResult<Module> {
+        expr: &Ranged<Expression>,
+        module: &Module,
+    ) -> EvaluationResult<Value> {
+        match &expr.data {
+            Expression::Identifier(ident) => {
+                Ok(match self.resolve_ident(ident, expr.ranges(), module)? {
+                    Value::Thunk(thunk) => {
+                        let value = self.eval_expr_eager(&thunk.expr, &thunk.module)?;
+                        *module.borrow_mut().map.get_mut(ident).unwrap() = value.clone();
+                        value
+                    }
+                    value => value,
+                })
+            }
+            Expression::Access { from, what } => {
+                Ok(match self.eval_access(from, what, module)? {
+                    Value::Thunk(thunk) => {
+                        let value = self.eval_expr_eager(&thunk.expr, &thunk.module)?;
+                        *thunk.module.borrow_mut().map.get_mut(&what.data).unwrap() = value.clone();
+                        value
+                    }
+                    value => value,
+                })
+            }
+            _ => self.eval_expr_lazy(expr, module),
+        }
+    }
+
+    fn eval_module(source_name: String, definitions: &[(String, Ranged<Expression>)]) -> Module {
         let module = value::new_module(source_name, HashMap::default());
 
         for (name, expr) in definitions {
-            let value = self.eval_expr(expr, &module)?;
+            // let value = self.eval_expr(expr, &module)?;
+            let value = Value::Thunk(value::new_thunk(expr.clone(), module.clone()));
             module.borrow_mut().map.insert(name.clone(), value);
         }
 
-        Ok(module)
+        module
     }
 
     pub fn eval_main(
@@ -282,7 +321,7 @@ impl Evaluator {
         source_name: String,
         definitions: &[(String, Ranged<Expression>)],
     ) -> EvaluationResult<Value> {
-        let module = self.eval_module(source_name, definitions)?;
+        let module = Self::eval_module(source_name, definitions);
 
         let main = module
             .borrow_mut()
@@ -292,12 +331,16 @@ impl Evaluator {
                 EvaluationError::basic(BaseEvaluationError::MainIsNotProvided, Default::default())
             })?;
 
-        let Value::Lambda(lambda) = main else {
+        let Value::Thunk(thunk) = main else {
+            unreachable!()
+        };
+
+        let Value::Lambda(lambda) = self.eval_expr_eager(&thunk.expr, &thunk.module)? else {
             let ranges = definitions.iter().find(|(ident, _)| ident == "main").unwrap().1.ranges();
             return Err(EvaluationError::basic(BaseEvaluationError::MainMustBeLambda, ranges))
         };
 
-        self.eval_expr(&lambda.expr, &lambda.module)
+        self.eval_expr_lazy(&lambda.expr, &lambda.module)
             .map_err(|error| {
                 let ranges = definitions
                     .iter()

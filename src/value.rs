@@ -12,6 +12,7 @@ pub enum Value {
     Pair(Pair),
     Lambda(Lambda),
     Module(Module),
+    Thunk(Thunk),
 }
 
 impl Value {
@@ -42,6 +43,9 @@ impl Value {
             Self::Pair(_) => Type::Pair,
             Self::Lambda(_) => Type::Lambda,
             Self::Module(_) => Type::Module,
+            // Not supposed to encounter this branch
+            // while evaluating, debug purposes only
+            Self::Thunk(_) => Type::Thunk,
         }
     }
 }
@@ -53,6 +57,7 @@ impl std::fmt::Display for Value {
             Self::Pair(pair) => write!(f, "({}:{})", pair.first, pair.second),
             Self::Lambda(_) => write!(f, "<lambda>"),
             Self::Module(_) => write!(f, "<module>"),
+            Self::Thunk(_) => write!(f, "<thunk>"),
         }
     }
 }
@@ -78,11 +83,18 @@ pub struct ModuleInstance {
 }
 pub type Module = Rc<RefCell<ModuleInstance>>;
 
-pub fn new_module(source: String, map: HashMap<String, Value>) -> Module {
-    Rc::new(RefCell::new(ModuleInstance {
-        source_name: source,
-        map,
-    }))
+pub fn new_module(source_name: String, map: HashMap<String, Value>) -> Module {
+    Rc::new(RefCell::new(ModuleInstance { source_name, map }))
+}
+
+pub struct ThunkInstance {
+    pub expr: Ranged<Expression>,
+    pub module: Module,
+}
+pub type Thunk = Rc<ThunkInstance>;
+
+pub fn new_thunk(expr: Ranged<Expression>, module: Module) -> Thunk {
+    Rc::new(ThunkInstance { expr, module })
 }
 
 #[derive(Debug)]
@@ -91,6 +103,7 @@ pub enum Type {
     Pair,
     Lambda,
     Module,
+    Thunk,
 }
 
 impl fmt::Display for Type {
@@ -100,6 +113,7 @@ impl fmt::Display for Type {
             Self::Pair => write!(f, "Pair"),
             Self::Lambda => write!(f, "Lambda"),
             Self::Module => write!(f, "Module"),
+            Self::Thunk => write!(f, "Thunk"),
         }
     }
 }
