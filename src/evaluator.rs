@@ -61,6 +61,12 @@ impl Evaluator {
                 self.check_pattern(first, &pair.first)?;
                 self.check_pattern(second, &pair.second)
             }
+            (Pattern::Or { right, left }, value) => (self.check_pattern(right, value).is_ok()
+                || self.check_pattern(left, value).is_ok())
+            .then_some(())
+            .ok_or_else(|| {
+                EvaluationError::basic(BaseEvaluationError::PatternCouldntMatch, pattern.ranges())
+            }),
             (Pattern::All(_), _) => Ok(()),
             (_, Value::Thunk(thunk)) => {
                 let value = self.eval_expr_lazy(&thunk.expr, &thunk.module)?;
@@ -86,6 +92,13 @@ impl Evaluator {
             (Pattern::Pair { first, second }, Value::Pair(pair)) => {
                 self.define_pattern_locals(first, *pair.first.clone())?;
                 self.define_pattern_locals(second, *pair.second.clone())
+            }
+            (Pattern::Or { right, left }, value) => {
+                if self.check_pattern(right, &value).is_ok() {
+                    self.define_pattern_locals(right, value)
+                } else {
+                    self.define_pattern_locals(left, value)
+                }
             }
             (_, Value::Thunk(thunk)) => {
                 let value = self.eval_expr_lazy(&thunk.expr, &thunk.module)?;
@@ -245,6 +258,31 @@ impl Evaluator {
         Ok(value.clone())
     }
 
+    fn eval_match(
+        &mut self,
+        expr: &Ranged<Expression>,
+        branches: &[(Ranged<Pattern>, Box<Ranged<Expression>>)],
+        ranges: Ranges,
+        module: &Module,
+    ) -> EvaluationResult<Value> {
+        let value = self.eval_expr_lazy(expr, module)?;
+
+        for (pattern, branch_expr) in branches {
+            if self.check_pattern(pattern, &value).is_ok() {
+                let locals_len = self.locals.len();
+                self.define_pattern_locals(pattern, value)?;
+                let result = self.eval_expr_lazy(branch_expr, module);
+                self.locals.truncate(locals_len);
+                return result;
+            }
+        }
+
+        Err(EvaluationError::basic(
+            BaseEvaluationError::NonExhaustiveMatch,
+            ranges,
+        ))
+    }
+
     pub fn eval_expr_lazy(
         &mut self,
         expr: &Ranged<Expression>,
@@ -271,6 +309,10 @@ impl Evaluator {
             } => self.eval_application(lambda_expr, args, expr.ranges(), module),
             Expression::Import(parts) => Self::eval_import(parts, expr.ranges()),
             Expression::Access { from, what } => self.eval_access(from, what, module),
+            Expression::Match {
+                expr: match_expr,
+                branches,
+            } => self.eval_match(match_expr, branches, expr.ranges(), module),
         }
     }
 
@@ -372,6 +414,7 @@ pub enum BaseEvaluationError {
     UnboundInModule(String),
     ParseError(ParseError),
     IOError(io::Error),
+    NonExhaustiveMatch,
 }
 
 impl fmt::Display for BaseEvaluationError {
@@ -390,6 +433,7 @@ impl fmt::Display for BaseEvaluationError {
             Self::UnboundInModule(ident) => write!(f, "`{ident}` is not bound in the module value."),
             Self::ParseError(error) => write!(f, "{error}"),
             Self::IOError(error) => write!(f, "{error}"),
+            Self::NonExhaustiveMatch => write!(f, "Value couldn't match any of the patterns in the match expression."),
         }
     }
 }

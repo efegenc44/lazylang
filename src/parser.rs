@@ -110,8 +110,28 @@ impl<'source> Parser<'source> {
         }
     }
 
+    fn or_pattern(&mut self) -> ParseResult<Pattern> {
+        let mut pattern = self.pair_pattern()?;
+
+        while self.optional(Token::Comma) {
+            self.tokens.next();
+            let left = self.pair_pattern()?;
+            let starts = pattern.starts();
+            let ends = left.ends();
+            pattern = Ranged::new(
+                Pattern::Or {
+                    right: Box::new(pattern),
+                    left: Box::new(left),
+                },
+                (starts, ends),
+            );
+        }
+
+        Ok(pattern)
+    }
+
     fn pattern(&mut self) -> ParseResult<Pattern> {
-        self.pair_pattern()
+        self.or_pattern()
     }
 
     fn parse_grouping(&mut self) -> ParseResult<Expression> {
@@ -176,12 +196,39 @@ impl<'source> Parser<'source> {
         Ok(Ranged::new(Expression::Import(parts), (starts, ends)))
     }
 
+    fn parse_match(&mut self) -> ParseResult<Expression> {
+        let starts = self.expect(Token::MatchKeyword).unwrap().starts();
+        let expr = Box::new(self.expression()?);
+
+        self.expect(Token::Bar).unwrap();
+        let pattern = self.pattern()?;
+        self.expect(Token::Arrow).unwrap();
+        let branch_expr = Box::new(self.expression()?);
+        let mut ends = branch_expr.ends();
+
+        let mut branches = vec![(pattern, branch_expr)];
+        while self.optional(Token::Bar) {
+            self.tokens.next();
+            let pattern = self.pattern()?;
+            self.expect(Token::Arrow).unwrap();
+            let expr = Box::new(self.expression()?);
+            ends = expr.ends();
+            branches.push((pattern, expr));
+        }
+
+        Ok(Ranged::new(
+            Expression::Match { expr, branches },
+            (starts, ends),
+        ))
+    }
+
     fn primary(&mut self) -> ParseResult<Expression> {
         match self.peek_token()?.data {
             Token::OpeningParenthesis => self.parse_grouping(),
             Token::LetKeyword => self.parse_let(),
             Token::Backslash => self.parse_lambda(),
             Token::ImportKeyword => self.parse_import(),
+            Token::MatchKeyword => self.parse_match(),
             _ => {
                 let (token, ranges) = self.tokens.next().unwrap().unwrap().into_tuple();
                 match token {
@@ -380,6 +427,10 @@ pub enum Expression {
         what: Ranged<String>,
     },
     Import(Vec<String>),
+    Match {
+        expr: Box<Ranged<Expression>>,
+        branches: Vec<(Ranged<Pattern>, Box<Ranged<Expression>>)>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -389,6 +440,10 @@ pub enum Pattern {
     Pair {
         first: Box<Ranged<Pattern>>,
         second: Box<Ranged<Pattern>>,
+    },
+    Or {
+        right: Box<Ranged<Pattern>>,
+        left: Box<Ranged<Pattern>>,
     },
 }
 
