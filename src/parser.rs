@@ -73,10 +73,14 @@ impl<'source> Parser<'source> {
 
     fn parse_pattern_grouping(&mut self) -> ParseResult<Pattern> {
         let starts = self.expect(Token::OpeningParenthesis).unwrap().starts();
-        let pattern = self.pattern()?.data;
-        let ends = self.expect(Token::ClosingParenthesis)?.ends();
-
-        Ok(Ranged::new(pattern, (starts, ends)))
+        Ok(if self.optional(Token::ClosingParenthesis) {
+            let ends = self.expect(Token::ClosingParenthesis).unwrap().ends();
+            Ranged::new(Pattern::Unit, (starts, ends))
+        } else {
+            let pattern = self.pattern()?.data;
+            let ends = self.expect(Token::ClosingParenthesis)?.ends();
+            Ranged::new(pattern, (starts, ends))
+        })
     }
 
     fn primary_pattern(&mut self) -> ParseResult<Pattern> {
@@ -89,6 +93,8 @@ impl<'source> Parser<'source> {
                     Token::NaturalNumber(nat) => {
                         Ok(Ranged::new(Pattern::NaturalNumber(nat), ranges))
                     }
+                    Token::TrueKeyword => Ok(Ranged::new(Pattern::Boolean(true), ranges)),
+                    Token::FalseKeyword => Ok(Ranged::new(Pattern::Boolean(false), ranges)),
                     unexpected => Err(Ranged::new(ParseError::UnexpectedToken(unexpected), ranges)),
                 }
             }
@@ -209,9 +215,9 @@ impl<'source> Parser<'source> {
         let starts = self.expect(Token::MatchKeyword).unwrap().starts();
         let expr = Box::new(self.expression()?);
 
-        self.expect(Token::Bar).unwrap();
+        self.expect(Token::Bar)?;
         let pattern = self.pattern()?;
-        self.expect(Token::Arrow).unwrap();
+        self.expect(Token::Arrow)?;
         let branch_expr = Box::new(self.expression()?);
         let mut ends = branch_expr.ends();
 
@@ -219,7 +225,7 @@ impl<'source> Parser<'source> {
         while self.optional(Token::Bar) {
             self.tokens.next();
             let pattern = self.pattern()?;
-            self.expect(Token::Arrow).unwrap();
+            self.expect(Token::Arrow)?;
             let expr = Box::new(self.expression()?);
             ends = expr.ends();
             branches.push((pattern, expr));
@@ -458,6 +464,8 @@ pub enum Pattern {
         right: Box<Ranged<Pattern>>,
         left: Box<Ranged<Pattern>>,
     },
+    Boolean(bool),
+    Unit,
 }
 
 #[derive(Clone, Copy, Debug)]

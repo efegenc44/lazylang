@@ -47,35 +47,36 @@ impl Evaluator {
     }
 
     fn check_pattern(&mut self, pattern: &Ranged<Pattern>, value: &Value) -> EvaluationResult<()> {
-        match (&pattern.data, value) {
-            (Pattern::NaturalNumber(nat), Value::Integer(int)) => (&nat.parse::<isize>().unwrap()
-                == int)
-                .then_some(())
-                .ok_or_else(|| {
-                    EvaluationError::basic(
-                        BaseEvaluationError::PatternCouldntMatch,
-                        pattern.ranges(),
-                    )
-                }),
+        let result = match (&pattern.data, value) {
+            (Pattern::NaturalNumber(nat), Value::Integer(int)) => {
+                &nat.parse::<isize>().unwrap() == int
+            }
             (Pattern::Pair { first, second }, Value::Pair(pair)) => {
                 self.check_pattern(first, &pair.first)?;
-                self.check_pattern(second, &pair.second)
+                self.check_pattern(second, &pair.second)?;
+                true
             }
-            (Pattern::Or { right, left }, value) => (self.check_pattern(right, value).is_ok()
-                || self.check_pattern(left, value).is_ok())
-            .then_some(())
-            .ok_or_else(|| {
-                EvaluationError::basic(BaseEvaluationError::PatternCouldntMatch, pattern.ranges())
-            }),
-            (Pattern::All(_), _) => Ok(()),
+            (Pattern::Or { right, left }, value) => {
+                self.check_pattern(right, value).is_ok() || self.check_pattern(left, value).is_ok()
+            }
+            (Pattern::Boolean(pattern_bool), Value::Boolean(value_bool)) => {
+                pattern_bool == value_bool
+            }
+            (Pattern::Unit, Value::Unit) | (Pattern::All(_), _) => true,
             (_, Value::Thunk(thunk)) => {
                 let value = self.eval_expr_lazy(&thunk.expr, &thunk.module)?;
-                self.check_pattern(pattern, &value)
+                self.check_pattern(pattern, &value).is_ok()
             }
-            _ => Err(EvaluationError::basic(
+            _ => false,
+        };
+
+        if result {
+            Ok(())
+        } else {
+            Err(EvaluationError::basic(
                 BaseEvaluationError::PatternCouldntMatch,
                 pattern.ranges(),
-            )),
+            ))
         }
     }
 
