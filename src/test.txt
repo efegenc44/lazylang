@@ -13,4 +13,13 @@ b = first(a(ones))
 
 c = 7
 
-main = test2.foo
+fib = \n -> match n
+| 0, 1 -> n
+| n    -> fib(n - 1) + fib(n - 2)
+
+fac = \n -> match n
+| 1 -> 1
+| n -> n * fac(n - 1)
+
+main = \->
+    fac(20)

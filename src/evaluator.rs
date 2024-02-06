@@ -235,10 +235,25 @@ impl Evaluator {
                 self.expect_number(rhs, module)?,
                 +
             ),
+            BinaryOp::Subtraction => numeric_operation!(
+                self.expect_number(lhs, module)?,
+                self.expect_number(rhs, module)?,
+                -
+            ),
             BinaryOp::Multiplication => numeric_operation!(
                 self.expect_number(lhs, module)?,
                 self.expect_number(rhs, module)?,
                 *
+            ),
+            BinaryOp::Division => numeric_operation!(
+                self.expect_number(lhs, module)?,
+                self.expect_number(rhs, module)?,
+                /
+            ),
+            BinaryOp::Modulo => numeric_operation!(
+                self.expect_number(lhs, module)?,
+                self.expect_number(rhs, module)?,
+                %
             ),
             BinaryOp::Pairing => Value::pair(
                 self.eval_expr_lazy(lhs, module)?,

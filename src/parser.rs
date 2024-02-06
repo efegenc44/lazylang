@@ -8,7 +8,7 @@ use crate::{
 };
 
 #[rustfmt::skip]
-const BINARY_OPERATORS: [(Token, Associativity, usize); 11] = [
+const BINARY_OPERATORS: [(Token, Associativity, usize); 14] = [
     (Token::OrKeyword,     Associativity::Left,  0),
     (Token::AndKeyword,    Associativity::Left,  1),
     (Token::DoubleEquals,  Associativity::None,  2),
@@ -19,7 +19,10 @@ const BINARY_OPERATORS: [(Token, Associativity, usize); 11] = [
     (Token::GreaterEquals, Associativity::None,  3),
     (Token::Colon,         Associativity::Right, 4),
     (Token::Plus,          Associativity::Left,  5),
+    (Token::Minus,         Associativity::Left,  5),
     (Token::Asterisk,      Associativity::Left,  6),
+    (Token::Slash,         Associativity::Left,  6),
+    (Token::ModKeyword,    Associativity::Left,  6),
 ];
 
 pub struct Parser<'source> {
@@ -524,7 +527,10 @@ pub enum Pattern {
 #[derive(Clone, Copy, Debug)]
 pub enum BinaryOp {
     Addition,
+    Subtraction,
     Multiplication,
+    Division,
+    Modulo,
     Pairing,
     Equivalence,
     NonEquivalence,
@@ -540,7 +546,10 @@ impl std::fmt::Display for BinaryOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Addition => write!(f, "+"),
+            Self::Subtraction => write!(f, "-"),
             Self::Multiplication => write!(f, "*"),
+            Self::Division => write!(f, "/"),
+            Self::Modulo => write!(f, "mod"),
             Self::Pairing => write!(f, ":"),
             Self::Equivalence => write!(f, "=="),
             Self::NonEquivalence => write!(f, "/="),
@@ -558,6 +567,9 @@ impl From<&Token> for BinaryOp {
     fn from(val: &Token) -> Self {
         match val {
             Token::Asterisk => Self::Multiplication,
+            Token::Slash => Self::Division,
+            Token::ModKeyword => Self::Modulo,
+            Token::Minus => Self::Subtraction,
             Token::Plus => Self::Addition,
             Token::Colon => Self::Pairing,
             Token::DoubleEquals => Self::Equivalence,

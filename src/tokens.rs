@@ -55,6 +55,7 @@ impl<'source> Tokens<'source> {
             "if" => Token::IfKeyword,
             "then" => Token::ThenKeyword,
             "else" => Token::ElseKeyword,
+            "mod" => Token::ModKeyword,
             _ => Token::Identifier(symbol),
         }
     }
@@ -162,6 +163,7 @@ pub enum Token {
     IfKeyword,
     ThenKeyword,
     ElseKeyword,
+    ModKeyword,
 }
 
 #[derive(Clone, Debug)]
