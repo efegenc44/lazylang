@@ -83,9 +83,22 @@ impl<'source> Parser<'source> {
         })
     }
 
+    fn parse_negative_number_pattern(&mut self) -> ParseResult<Pattern> {
+        let starts = self.expect(Token::Minus).unwrap().starts();
+        let (token, ranges) = self.next_token()?.into_tuple();
+        match token {
+            Token::NaturalNumber(nat) => Ok(Ranged::new(
+                Pattern::NegativeInteger(nat),
+                (starts, ranges.1),
+            )),
+            unexpected => Err(Ranged::new(ParseError::UnexpectedToken(unexpected), ranges)),
+        }
+    }
+
     fn primary_pattern(&mut self) -> ParseResult<Pattern> {
         match self.peek_token()?.data {
             Token::OpeningParenthesis => self.parse_pattern_grouping(),
+            Token::Minus => self.parse_negative_number_pattern(),
             _ => {
                 let (token, ranges) = self.tokens.next().unwrap().unwrap().into_tuple();
                 match token {
@@ -237,6 +250,14 @@ impl<'source> Parser<'source> {
         ))
     }
 
+    fn parse_negation(&mut self) -> ParseResult<Expression> {
+        let starts = self.expect(Token::Minus).unwrap().starts();
+        let expr = Box::new(self.primary()?);
+        let ends = expr.ends();
+
+        Ok(Ranged::new(Expression::Negation(expr), (starts, ends)))
+    }
+
     fn primary(&mut self) -> ParseResult<Expression> {
         match self.peek_token()?.data {
             Token::OpeningParenthesis => self.parse_grouping(),
@@ -244,6 +265,7 @@ impl<'source> Parser<'source> {
             Token::Backslash => self.parse_lambda(),
             Token::ImportKeyword => self.parse_import(),
             Token::MatchKeyword => self.parse_match(),
+            Token::Minus => self.parse_negation(),
             _ => {
                 let (token, ranges) = self.tokens.next().unwrap().unwrap().into_tuple();
                 match token {
@@ -450,6 +472,7 @@ pub enum Expression {
     },
     Boolean(bool),
     Unit,
+    Negation(Box<Ranged<Expression>>),
 }
 
 #[derive(Clone, Debug)]
@@ -466,6 +489,7 @@ pub enum Pattern {
     },
     Boolean(bool),
     Unit,
+    NegativeInteger(String),
 }
 
 #[derive(Clone, Copy, Debug)]

@@ -62,6 +62,9 @@ impl Evaluator {
             (Pattern::Boolean(pattern_bool), Value::Boolean(value_bool)) => {
                 pattern_bool == value_bool
             }
+            (Pattern::NegativeInteger(neg_int), Value::Integer(int)) => {
+                &-neg_int.parse::<isize>().unwrap() == int
+            }
             (Pattern::Unit, Value::Unit) | (Pattern::All(_), _) => true,
             (_, Value::Thunk(thunk)) => {
                 let value = self.eval_expr_lazy(&thunk.expr, &thunk.module)?;
@@ -375,6 +378,17 @@ impl Evaluator {
         ))
     }
 
+    fn eval_negation(
+        &mut self,
+        expr: &Ranged<Expression>,
+        module: &Module,
+    ) -> EvaluationResult<Value> {
+        Ok(match self.expect_number(expr, module)? {
+            Value::Integer(int) => Value::Integer(-int),
+            _ => unreachable!(),
+        })
+    }
+
     pub fn eval_expr_lazy(
         &mut self,
         expr: &Ranged<Expression>,
@@ -407,6 +421,7 @@ impl Evaluator {
             } => self.eval_match(match_expr, branches, expr.ranges(), module),
             Expression::Boolean(bool) => Ok(Value::Boolean(*bool)),
             Expression::Unit => Ok(Value::Unit),
+            Expression::Negation(arg_expr) => self.eval_negation(arg_expr, module),
         }
     }
 
