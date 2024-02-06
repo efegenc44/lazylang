@@ -7,10 +7,15 @@ use crate::{
     tokens::{Token, TokenError, Tokens},
 };
 
-const BINARY_OPERATORS: [(Token, Associativity, usize); 3] = [
-    (Token::Colon, Associativity::Right, 0),
-    (Token::Plus, Associativity::Left, 1),
-    (Token::Asterisk, Associativity::Left, 2),
+#[rustfmt::skip]
+const BINARY_OPERATORS: [(Token, Associativity, usize); 7] = [
+    (Token::OrKeyword,    Associativity::Left,  0),
+    (Token::AndKeyword,   Associativity::Left,  1),
+    (Token::DoubleEquals, Associativity::None,  2),
+    (Token::SlashEquals,  Associativity::None,  2),
+    (Token::Colon,        Associativity::Right, 3),
+    (Token::Plus,         Associativity::Left,  4),
+    (Token::Asterisk,     Associativity::Left,  5),
 ];
 
 pub struct Parser<'source> {
@@ -433,7 +438,7 @@ pub enum Expression {
         expr: Box<Ranged<Expression>>,
         branches: Vec<(Ranged<Pattern>, Box<Ranged<Expression>>)>,
     },
-    Boolean(bool)
+    Boolean(bool),
 }
 
 #[derive(Clone, Debug)]
@@ -455,6 +460,10 @@ pub enum BinaryOp {
     Addition,
     Multiplication,
     Pairing,
+    Equivalence,
+    NonEquivalence,
+    BooleanOr,
+    BooleanAnd,
 }
 
 impl std::fmt::Display for BinaryOp {
@@ -463,6 +472,10 @@ impl std::fmt::Display for BinaryOp {
             Self::Addition => write!(f, "+"),
             Self::Multiplication => write!(f, "*"),
             Self::Pairing => write!(f, ":"),
+            Self::Equivalence => write!(f, "=="),
+            Self::NonEquivalence => write!(f, "/="),
+            Self::BooleanOr => write!(f, "or"),
+            Self::BooleanAnd => write!(f, "and"),
         }
     }
 }
@@ -473,6 +486,10 @@ impl From<&Token> for BinaryOp {
             Token::Asterisk => Self::Multiplication,
             Token::Plus => Self::Addition,
             Token::Colon => Self::Pairing,
+            Token::DoubleEquals => Self::Equivalence,
+            Token::SlashEquals => Self::NonEquivalence,
+            Token::OrKeyword => Self::BooleanOr,
+            Token::AndKeyword => Self::BooleanAnd,
             _ => unreachable!(),
         }
     }
@@ -482,6 +499,5 @@ impl From<&Token> for BinaryOp {
 enum Associativity {
     Right,
     Left,
-    #[allow(unused)]
     None,
 }

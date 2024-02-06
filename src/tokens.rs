@@ -17,6 +17,15 @@ impl<'source> Tokens<'source> {
         }
     }
 
+    fn two_char_token(&mut self, expected: char, then: Token, otherwise: Token) -> Token {
+        if self.chars.next_if_eq(&expected).is_some() {
+            self.col += 1;
+            then
+        } else {
+            otherwise
+        }
+    }
+
     fn number(&mut self) -> Token {
         let mut number = String::new();
         while let Some(ch) = self.chars.next_if(|ch| ch.is_ascii_digit()) {
@@ -41,6 +50,8 @@ impl<'source> Tokens<'source> {
             "match" => Token::MatchKeyword,
             "true" => Token::TrueKeyword,
             "false" => Token::FalseKeyword,
+            "and" => Token::AndKeyword,
+            "or" => Token::OrKeyword,
             _ => Token::Identifier(symbol),
         }
     }
@@ -89,15 +100,9 @@ impl Iterator for Tokens<'_> {
             ')' => Token::ClosingParenthesis,
             '*' => Token::Asterisk,
             '\\' => Token::Backslash,
-            '=' => Token::Equals,
-            '-' => {
-                if self.chars.next_if_eq(&'>').is_some() {
-                    self.col += 1;
-                    Token::Arrow
-                } else {
-                    Token::Minus
-                }
-            }
+            '=' => self.two_char_token('=', Token::DoubleEquals, Token::Equals),
+            '-' => self.two_char_token('>', Token::Arrow, Token::Minus),
+            '/' => self.two_char_token('=', Token::SlashEquals, Token::Slash),
             ':' => Token::Colon,
             ',' => Token::Comma,
             '+' => Token::Plus,
@@ -124,9 +129,12 @@ pub enum Token {
     NaturalNumber(String),
     OpeningParenthesis,
     ClosingParenthesis,
+    DoubleEquals,
+    SlashEquals,
     Backslash,
     Asterisk,
     Equals,
+    Slash,
     Arrow,
     Colon,
     Comma,
@@ -140,6 +148,8 @@ pub enum Token {
     MatchKeyword,
     TrueKeyword,
     FalseKeyword,
+    AndKeyword,
+    OrKeyword,
 }
 
 #[derive(Clone, Debug)]

@@ -6,7 +6,7 @@ use crate::{
     parser::{BinaryOp, Expression, ParseError, Parser, Pattern},
     ranged::{Ranged, Ranges},
     tokens::Tokens,
-    value::{self, Module, Type, Value},
+    value::{self, Lambda, Module, Type, Value},
 };
 
 pub struct Evaluator {
@@ -108,6 +108,94 @@ impl Evaluator {
         }
     }
 
+    fn expect_boolean(
+        &mut self,
+        expr: &Ranged<Expression>,
+        module: &Module,
+    ) -> EvaluationResult<bool> {
+        let value = self.eval_expr_eager(expr, module)?;
+        match value {
+            Value::Boolean(bool) => Ok(bool),
+            _ => Err(EvaluationError::basic(
+                BaseEvaluationError::TypeMismatch {
+                    expected: Type::Boolean,
+                    found: value.typ(),
+                },
+                expr.ranges(),
+            )),
+        }
+    }
+
+    fn expect_lambda(
+        &mut self,
+        expr: &Ranged<Expression>,
+        module: &Module,
+    ) -> EvaluationResult<Lambda> {
+        let value = self.eval_expr_eager(expr, module)?;
+        match value {
+            Value::Lambda(lambda) => Ok(lambda),
+            _ => Err(EvaluationError::basic(
+                BaseEvaluationError::TypeMismatch {
+                    expected: Type::Lambda,
+                    found: value.typ(),
+                },
+                expr.ranges(),
+            )),
+        }
+    }
+
+    fn expect_module(
+        &mut self,
+        expr: &Ranged<Expression>,
+        module: &Module,
+    ) -> EvaluationResult<Module> {
+        let value = self.eval_expr_eager(expr, module)?;
+        match value {
+            Value::Module(module) => Ok(module),
+            _ => Err(EvaluationError::basic(
+                BaseEvaluationError::TypeMismatch {
+                    expected: Type::Module,
+                    found: value.typ(),
+                },
+                expr.ranges(),
+            )),
+        }
+    }
+
+    fn expect_number(
+        &mut self,
+        expr: &Ranged<Expression>,
+        module: &Module,
+    ) -> EvaluationResult<Value> {
+        let value = self.eval_expr_eager(expr, module)?;
+        match value {
+            Value::Integer(_) => Ok(value),
+            _ => Err(EvaluationError::basic(
+                BaseEvaluationError::ExpectedNumber(value.typ()),
+                expr.ranges(),
+            )),
+        }
+    }
+
+    fn value_equality(
+        &mut self,
+        left_value: &Value,
+        right_value: &Value,
+    ) -> EvaluationResult<bool> {
+        match (left_value, right_value) {
+            (Value::Integer(left_int), Value::Integer(right_int)) => Ok(left_int == right_int),
+            (Value::Pair(left_pair), Value::Pair(right_pair)) => Ok(self
+                .value_equality(&left_pair.first, &right_pair.first)?
+                && self.value_equality(&left_pair.second, &right_pair.second)?),
+            (Value::Boolean(left_bool), Value::Boolean(right_bool)) => Ok(left_bool == right_bool),
+            (Value::Thunk(thunk), other) | (other, Value::Thunk(thunk)) => {
+                let value = self.eval_expr_lazy(&thunk.expr, &thunk.module)?;
+                self.value_equality(&value, other)
+            }
+            _ => Ok(false),
+        }
+    }
+
     fn eval_binary(
         &mut self,
         lhs: &Ranged<Expression>,
@@ -117,45 +205,55 @@ impl Evaluator {
     ) -> EvaluationResult<Value> {
         Ok(match bop {
             BinaryOp::Addition => {
-                let (lhs, rhs) = match (
-                    self.eval_expr_eager(lhs, module)?,
-                    self.eval_expr_eager(rhs, module)?,
+                match (
+                    self.expect_number(lhs, module)?,
+                    self.expect_number(lhs, module)?,
                 ) {
-                    (Value::Integer(left_int), Value::Integer(right_int)) => (left_int, right_int),
-                    (left_value, right_value) => {
-                        return Err(EvaluationError::basic(
-                            BaseEvaluationError::ExpectedNumbers(
-                                left_value.typ(),
-                                right_value.typ(),
-                            ),
-                            (lhs.starts(), rhs.ends()),
-                        ))
+                    (Value::Integer(left_int), Value::Integer(right_int)) => {
+                        Value::Integer(left_int + right_int)
                     }
-                };
-                Value::Integer(lhs + rhs)
+                    _ => unreachable!(),
+                }
             }
             BinaryOp::Multiplication => {
-                let (lhs, rhs) = match (
-                    self.eval_expr_eager(lhs, module)?,
-                    self.eval_expr_eager(rhs, module)?,
+                match (
+                    self.expect_number(lhs, module)?,
+                    self.expect_number(lhs, module)?,
                 ) {
-                    (Value::Integer(left_int), Value::Integer(right_int)) => (left_int, right_int),
-                    (left_value, right_value) => {
-                        return Err(EvaluationError::basic(
-                            BaseEvaluationError::ExpectedNumbers(
-                                left_value.typ(),
-                                right_value.typ(),
-                            ),
-                            (lhs.starts(), rhs.ends()),
-                        ))
+                    (Value::Integer(left_int), Value::Integer(right_int)) => {
+                        Value::Integer(left_int * right_int)
                     }
-                };
-                Value::Integer(lhs * rhs)
+                    _ => unreachable!(),
+                }
             }
             BinaryOp::Pairing => Value::pair(
                 self.eval_expr_lazy(lhs, module)?,
                 self.eval_expr_lazy(rhs, module)?,
             ),
+            BinaryOp::Equivalence => {
+                let left_value = self.eval_expr_lazy(lhs, module)?;
+                let right_value = self.eval_expr_lazy(rhs, module)?;
+                Value::Boolean(self.value_equality(&left_value, &right_value)?)
+            }
+            BinaryOp::NonEquivalence => {
+                let left_value = self.eval_expr_lazy(lhs, module)?;
+                let right_value = self.eval_expr_lazy(rhs, module)?;
+                Value::Boolean(!self.value_equality(&left_value, &right_value)?)
+            }
+            BinaryOp::BooleanOr => {
+                if self.expect_boolean(lhs, module)? == true {
+                    Value::Boolean(true)
+                } else {
+                    Value::Boolean(self.expect_boolean(rhs, module)?)
+                }
+            }
+            BinaryOp::BooleanAnd => {
+                if self.expect_boolean(lhs, module)? == false {
+                    Value::Boolean(false)
+                } else {
+                    Value::Boolean(self.expect_boolean(rhs, module)?)
+                }
+            }
         })
     }
 
@@ -182,10 +280,7 @@ impl Evaluator {
         ranges: Ranges,
         module: &Module,
     ) -> EvaluationResult<Value> {
-        let value = self.eval_expr_eager(expr, module)?;
-        let Value::Lambda(lambda) = value else {
-            return Err(EvaluationError::basic(BaseEvaluationError::ExpectedLambda(value.typ()), expr.ranges()));
-        };
+        let lambda = self.expect_lambda(expr, module)?;
 
         if args.len() != lambda.args.len() {
             return Err(EvaluationError::basic(
@@ -244,11 +339,7 @@ impl Evaluator {
         what: &Ranged<String>,
         module: &Module,
     ) -> EvaluationResult<Value> {
-        let from_value = self.eval_expr_eager(from, module)?;
-
-        let Value::Module(module) = from_value else {
-            return Err(EvaluationError::basic(BaseEvaluationError::ExpectedModule(from_value.typ()), from.ranges()));
-        };
+        let module = self.expect_module(from, module)?;
 
         let map = &module.borrow().map;
         let Some(value) = map.get(&what.data) else {
@@ -404,9 +495,7 @@ impl Evaluator {
 pub enum BaseEvaluationError {
     PatternCouldntMatch,
     UnboundIdentifier(String),
-    ExpectedNumbers(Type, Type),
-    ExpectedLambda(Type),
-    ExpectedModule(Type),
+    ExpectedNumber(Type),
     ArityMismatch { takes: usize, provided: usize },
     ErrorWhileEvaluatingLambda,
     ErrorWhileImporting,
@@ -416,6 +505,7 @@ pub enum BaseEvaluationError {
     ParseError(ParseError),
     IOError(io::Error),
     NonExhaustiveMatch,
+    TypeMismatch { expected: Type, found: Type },
 }
 
 impl fmt::Display for BaseEvaluationError {
@@ -423,18 +513,29 @@ impl fmt::Display for BaseEvaluationError {
         match self {
             Self::PatternCouldntMatch => write!(f, "Pattern couldn't match the value."),
             Self::UnboundIdentifier(ident) => write!(f, "`{ident}` was never bound."),
-            Self::ExpectedNumbers(left_type, right_type) => write!(f, "Expected numbers in numerical operation instead found `{left_type}` and `{right_type}`."),
-            Self::ExpectedLambda(found) => write!(f, "Expected lambda in application instead found `{found}`."),
-            Self::ArityMismatch { takes, provided } => write!(f, "Lambda value takes `{takes}` arguments instead `{provided}` provided."),
-            Self::ErrorWhileEvaluatingLambda => write!(f, "An error occured while evaluating the lambda."),
+            Self::ExpectedNumber(found) => write!(f, "Expected number instead found `{found}`."),
+            Self::ArityMismatch { takes, provided } => write!(
+                f,
+                "Lambda value takes `{takes}` arguments instead `{provided}` provided."
+            ),
+            Self::ErrorWhileEvaluatingLambda => {
+                write!(f, "An error occured while evaluating the lambda.")
+            }
             Self::ErrorWhileImporting => write!(f, "An error occured while importing the module."),
             Self::MainMustBeLambda => write!(f, "`main` must be bound to a lambda value."),
             Self::MainIsNotProvided => write!(f, "`main` is absent."),
-            Self::ExpectedModule(found) => write!(f, "Expeceted module in access instead found {found}."),
-            Self::UnboundInModule(ident) => write!(f, "`{ident}` is not bound in the module value."),
+            Self::UnboundInModule(ident) => {
+                write!(f, "`{ident}` is not bound in the module value.")
+            }
             Self::ParseError(error) => write!(f, "{error}"),
             Self::IOError(error) => write!(f, "{error}"),
-            Self::NonExhaustiveMatch => write!(f, "Value couldn't match any of the patterns in the match expression."),
+            Self::NonExhaustiveMatch => write!(
+                f,
+                "Value couldn't match any of the patterns in the match expression."
+            ),
+            Self::TypeMismatch { expected, found } => {
+                write!(f, "Expected `{expected}` instead found `{found}`.")
+            }
         }
     }
 }
