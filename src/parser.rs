@@ -258,6 +258,25 @@ impl<'source> Parser<'source> {
         Ok(Ranged::new(Expression::Negation(expr), (starts, ends)))
     }
 
+    fn parse_if(&mut self) -> ParseResult<Expression> {
+        let starts = self.expect(Token::IfKeyword).unwrap().starts();
+        let cond = Box::new(self.expression()?);
+        self.expect(Token::ThenKeyword)?;
+        let then = Box::new(self.expression()?);
+        self.expect(Token::ElseKeyword)?;
+        let otherwise = Box::new(self.expression()?);
+        let ends = otherwise.ends();
+
+        Ok(Ranged::new(
+            Expression::If {
+                cond,
+                then,
+                otherwise,
+            },
+            (starts, ends),
+        ))
+    }
+
     fn primary(&mut self) -> ParseResult<Expression> {
         match self.peek_token()?.data {
             Token::OpeningParenthesis => self.parse_grouping(),
@@ -266,6 +285,7 @@ impl<'source> Parser<'source> {
             Token::ImportKeyword => self.parse_import(),
             Token::MatchKeyword => self.parse_match(),
             Token::Minus => self.parse_negation(),
+            Token::IfKeyword => self.parse_if(),
             _ => {
                 let (token, ranges) = self.tokens.next().unwrap().unwrap().into_tuple();
                 match token {
@@ -473,6 +493,11 @@ pub enum Expression {
     Boolean(bool),
     Unit,
     Negation(Box<Ranged<Expression>>),
+    If {
+        cond: Box<Ranged<Expression>>,
+        then: Box<Ranged<Expression>>,
+        otherwise: Box<Ranged<Expression>>,
+    },
 }
 
 #[derive(Clone, Debug)]

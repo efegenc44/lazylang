@@ -389,6 +389,20 @@ impl Evaluator {
         })
     }
 
+    fn eval_if(
+        &mut self,
+        cond: &Ranged<Expression>,
+        then: &Ranged<Expression>,
+        otherwise: &Ranged<Expression>,
+        module: &Module,
+    ) -> EvaluationResult<Value> {
+        if self.expect_boolean(cond, module)? {
+            self.eval_expr_lazy(then, module)
+        } else {
+            self.eval_expr_lazy(otherwise, module)
+        }
+    }
+
     pub fn eval_expr_lazy(
         &mut self,
         expr: &Ranged<Expression>,
@@ -422,6 +436,11 @@ impl Evaluator {
             Expression::Boolean(bool) => Ok(Value::Boolean(*bool)),
             Expression::Unit => Ok(Value::Unit),
             Expression::Negation(arg_expr) => self.eval_negation(arg_expr, module),
+            Expression::If {
+                cond,
+                then,
+                otherwise,
+            } => self.eval_if(cond, then, otherwise, module),
         }
     }
 

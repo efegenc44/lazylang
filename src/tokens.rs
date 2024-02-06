@@ -52,6 +52,9 @@ impl<'source> Tokens<'source> {
             "false" => Token::FalseKeyword,
             "and" => Token::AndKeyword,
             "or" => Token::OrKeyword,
+            "if" => Token::IfKeyword,
+            "then" => Token::ThenKeyword,
+            "else" => Token::ElseKeyword,
             _ => Token::Identifier(symbol),
         }
     }
@@ -150,6 +153,9 @@ pub enum Token {
     FalseKeyword,
     AndKeyword,
     OrKeyword,
+    IfKeyword,
+    ThenKeyword,
+    ElseKeyword,
 }
 
 #[derive(Clone, Debug)]
