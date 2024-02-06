@@ -39,6 +39,8 @@ impl<'source> Tokens<'source> {
             "in" => Token::InKeyword,
             "import" => Token::ImportKeyword,
             "match" => Token::MatchKeyword,
+            "true" => Token::TrueKeyword,
+            "false" => Token::FalseKeyword,
             _ => Token::Identifier(symbol),
         }
     }
@@ -136,6 +138,8 @@ pub enum Token {
     InKeyword,
     ImportKeyword,
     MatchKeyword,
+    TrueKeyword,
+    FalseKeyword,
 }
 
 #[derive(Clone, Debug)]

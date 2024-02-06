@@ -238,6 +238,8 @@ impl<'source> Parser<'source> {
                     Token::NaturalNumber(nat) => {
                         Ok(Ranged::new(Expression::NaturalNumber(nat), ranges))
                     }
+                    Token::TrueKeyword => Ok(Ranged::new(Expression::Boolean(true), ranges)),
+                    Token::FalseKeyword => Ok(Ranged::new(Expression::Boolean(false), ranges)),
                     unexpected => Err(Ranged::new(ParseError::UnexpectedToken(unexpected), ranges)),
                 }
             }
@@ -431,6 +433,7 @@ pub enum Expression {
         expr: Box<Ranged<Expression>>,
         branches: Vec<(Ranged<Pattern>, Box<Ranged<Expression>>)>,
     },
+    Boolean(bool)
 }
 
 #[derive(Clone, Debug)]

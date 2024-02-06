@@ -313,6 +313,7 @@ impl Evaluator {
                 expr: match_expr,
                 branches,
             } => self.eval_match(match_expr, branches, expr.ranges(), module),
+            Expression::Boolean(bool) => Ok(Value::Boolean(*bool)),
         }
     }
 

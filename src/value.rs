@@ -12,6 +12,7 @@ pub enum Value {
     Pair(Pair),
     Lambda(Lambda),
     Module(Module),
+    Boolean(bool),
     Thunk(Thunk),
 }
 
@@ -43,6 +44,7 @@ impl Value {
             Self::Pair(_) => Type::Pair,
             Self::Lambda(_) => Type::Lambda,
             Self::Module(_) => Type::Module,
+            Self::Boolean(_) => Type::Boolean,
             // Not supposed to encounter this branch
             // while evaluating, debug purposes only
             Self::Thunk(_) => Type::Thunk,
@@ -57,6 +59,7 @@ impl std::fmt::Display for Value {
             Self::Pair(pair) => write!(f, "({}:{})", pair.first, pair.second),
             Self::Lambda(_) => write!(f, "<lambda>"),
             Self::Module(_) => write!(f, "<module>"),
+            Self::Boolean(bool) => write!(f, "{bool}"),
             Self::Thunk(_) => write!(f, "<thunk>"),
         }
     }
@@ -103,6 +106,7 @@ pub enum Type {
     Pair,
     Lambda,
     Module,
+    Boolean,
     Thunk,
 }
 
@@ -114,6 +118,7 @@ impl fmt::Display for Type {
             Self::Lambda => write!(f, "Lambda"),
             Self::Module => write!(f, "Module"),
             Self::Thunk => write!(f, "Thunk"),
+            Self::Boolean => write!(f, "Boolean"),
         }
     }
 }
