@@ -1,7 +1,7 @@
 use core::fmt;
 use std::io;
 
-use crate::ranged::Ranged;
+use crate::{evaluator::BaseEvaluationError, parser::ParseError, ranged::Ranged};
 
 pub fn report<E: fmt::Display>(
     error: &Ranged<E>,
@@ -41,6 +41,25 @@ pub fn report<E: fmt::Display>(
 }
 
 pub fn report_file_read(error: &io::Error, source_name: &str) {
+    eprintln!();
+    eprintln!("  Error | [{source_name}]",);
+    eprintln!("        |");
+    eprintln!("        | {error}\n");
+}
+
+pub fn report_unexpected_eof(error: &ParseError, source_name: &str, source: &str) {
+    let lines = source.lines().enumerate();
+
+    let (line_index, last_line) = lines.last().unwrap();
+    let row_start = line_index + 1;
+    eprintln!();
+    eprintln!("  Error | [{source_name}:{row_start}] (at parsing)");
+    eprintln!("        |");
+    eprintln!("   {row_start:>4} | {last_line}");
+    eprintln!("        | {error}\n");
+}
+
+pub fn report_absent_main(error: &BaseEvaluationError, source_name: &str) {
     eprintln!();
     eprintln!("  Error | [{source_name}]",);
     eprintln!("        |");

@@ -428,7 +428,7 @@ impl fmt::Display for BaseEvaluationError {
             Self::ErrorWhileEvaluatingLambda => write!(f, "An error occured while evaluating the lambda."),
             Self::ErrorWhileImporting => write!(f, "An error occured while importing the module."),
             Self::MainMustBeLambda => write!(f, "`main` must be bound to a lambda value."),
-            Self::MainIsNotProvided => write!(f, "`main` is not bound."),
+            Self::MainIsNotProvided => write!(f, "`main` is absent."),
             Self::ExpectedModule(found) => write!(f, "Expeceted module in access instead found {found}."),
             Self::UnboundInModule(ident) => write!(f, "`{ident}` is not bound in the module value."),
             Self::ParseError(error) => write!(f, "{error}"),
@@ -465,18 +465,18 @@ impl EvaluationError {
 
     pub fn report(&self, source_name: &str, source: &str) {
         if matches!(&self.error.data, BaseEvaluationError::MainIsNotProvided) {
-            todo!()
-        }
+            error::report_absent_main(&self.error.data, source_name);
+        } else {
+            error::report(&self.error, source_name, source, "evaluation");
 
-        error::report(&self.error, source_name, source, "evaluation");
-
-        if let Some((error, source_name)) = &self.origin {
-            eprintln!("      ! | Originates from");
-            let source = match fs::read_to_string(source_name) {
-                Ok(source) => source,
-                Err(error) => return error::report_file_read(&error, source_name),
-            };
-            error.report(source_name, &source);
+            if let Some((error, source_name)) = &self.origin {
+                eprintln!("      ! | Originates from");
+                let source = match fs::read_to_string(source_name) {
+                    Ok(source) => source,
+                    Err(error) => return error::report_file_read(&error, source_name),
+                };
+                error.report(source_name, &source);
+            }
         }
     }
 }

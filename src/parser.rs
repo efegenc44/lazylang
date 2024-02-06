@@ -391,10 +391,10 @@ impl From<&Ranged<TokenError>> for Ranged<ParseError> {
 impl Ranged<ParseError> {
     pub fn report(&self, source_name: &str, source: &str) {
         if matches!(self.data, ParseError::UnexpectedEOF) {
-            todo!()
+            error::report_unexpected_eof(&self.data, source_name, source);
+        } else {
+            error::report(self, source_name, source, "parsing");
         }
-
-        error::report(self, source_name, source, "parsing");
     }
 }
 
