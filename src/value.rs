@@ -2,8 +2,7 @@ use core::fmt;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
-    parser::{Expression, Pattern},
-    ranged::Ranged,
+    evaluator::{EvaluationResult, Evaluator}, parser::{Expression, Pattern}, ranged::Ranged
 };
 
 #[derive(Clone)]
@@ -14,6 +13,7 @@ pub enum Value {
     Module(Module),
     Boolean(bool),
     Unit,
+    Native(fn(&mut Evaluator, &Module, &[Ranged<Expression>]) -> EvaluationResult<Value>),
     Thunk(Thunk),
 }
 
@@ -43,7 +43,8 @@ impl Value {
         match self {
             Self::Integer(_) => Type::Integer,
             Self::Pair(_) => Type::Pair,
-            Self::Lambda(_) => Type::Lambda,
+            Self::Lambda(_) |
+            Self::Native(_) => Type::Lambda,
             Self::Module(_) => Type::Module,
             Self::Boolean(_) => Type::Boolean,
             Self::Unit => Type::Unit,
@@ -63,6 +64,7 @@ impl fmt::Display for Value {
             Self::Module(_) => write!(f, "<module>"),
             Self::Boolean(bool) => write!(f, "{bool}"),
             Self::Unit => write!(f, "()"),
+            Self::Native(_) => write!(f, "<native>"),
             Self::Thunk(_) => write!(f, "<thunk>"),
         }
     }

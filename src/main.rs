@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     env::args,
     fs,
     io::{self, Write},
@@ -15,6 +14,7 @@ mod parser;
 mod ranged;
 mod tokens;
 mod value;
+mod prelude;
 
 fn main() -> io::Result<()> {
     match &args().collect::<Vec<_>>()[1..] {
@@ -47,7 +47,7 @@ fn repl() -> io::Result<()> {
 
     let mut stdout = io::stdout();
     let stdin = io::stdin();
-    let module = value::new_module(String::new(), HashMap::with_capacity(0));
+    let module = value::new_module(String::from("REPL"), prelude::get_map());
     loop {
         print!("> ");
         stdout.flush()?;

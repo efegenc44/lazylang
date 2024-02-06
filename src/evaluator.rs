@@ -2,11 +2,7 @@ use core::fmt;
 use std::{collections::HashMap, fs, io};
 
 use crate::{
-    error,
-    parser::{BinaryOp, Expression, ParseError, Parser, Pattern},
-    ranged::{Ranged, Ranges},
-    tokens::Tokens,
-    value::{self, Lambda, Module, Type, Value},
+    error, parser::{BinaryOp, Expression, ParseError, Parser, Pattern}, prelude, ranged::{Ranged, Ranges}, tokens::Tokens, value::{self, Module, Type, Value}
 };
 
 macro_rules! numeric_operation {
@@ -156,10 +152,11 @@ impl Evaluator {
         &mut self,
         expr: &Ranged<Expression>,
         module: &Module,
-    ) -> EvaluationResult<Lambda> {
+    ) -> EvaluationResult<Value> {
         let value = self.eval_expr_eager(expr, module)?;
         match value {
-            Value::Lambda(lambda) => Ok(lambda),
+            Value::Lambda(_) |
+            Value::Native(_) => Ok(value),
             _ => Err(EvaluationError::basic(
                 BaseEvaluationError::TypeMismatch {
                     expected: Type::Lambda,
@@ -188,7 +185,7 @@ impl Evaluator {
         }
     }
 
-    fn expect_number(
+    pub fn expect_number(
         &mut self,
         expr: &Ranged<Expression>,
         module: &Module,
@@ -331,35 +328,48 @@ impl Evaluator {
         ranges: Ranges,
         module: &Module,
     ) -> EvaluationResult<Value> {
-        let lambda = self.expect_lambda(expr, module)?;
+        match self.expect_lambda(expr, module)? {
+            Value::Native(native) => {
+                let result = native(self, module, args);
+                if let Err(error) = native(self, module, args) {
+                    if let BaseEvaluationError::NativeError(_) = error.error.data {
+                        return Err(EvaluationError::basic(error.error.data, ranges));
+                    }
+                }
 
-        if args.len() != lambda.args.len() {
-            return Err(EvaluationError::basic(
-                BaseEvaluationError::ArityMismatch {
-                    takes: lambda.args.len(),
-                    provided: args.len(),
-                },
-                ranges,
-            ));
+                result
+            },
+            Value::Lambda(lambda) => {
+                if args.len() != lambda.args.len() {
+                    return Err(EvaluationError::basic(
+                        BaseEvaluationError::ArityMismatch {
+                            takes: lambda.args.len(),
+                            provided: args.len(),
+                        },
+                        ranges,
+                    ));
+                }
+
+                let local_len = self.locals.len();
+                self.locals.extend(lambda.captures.clone());
+                for (argument, pattern) in args.iter().zip(&lambda.args) {
+                    let value = self.eval_expr_lazy(argument, &lambda.module)?;
+                    self.check_pattern(pattern, &value)?;
+                    self.define_pattern_locals(pattern, value)?;
+                }
+                let result = self.eval_expr_lazy(&lambda.expr, &lambda.module);
+                self.locals.truncate(local_len);
+
+                result.map_err(|error| {
+                    EvaluationError::complex(
+                        BaseEvaluationError::ErrorWhileEvaluatingLambda,
+                        ranges,
+                        (Box::new(error), lambda.module.borrow().source_name.clone()),
+                    )
+                })
+            },
+            _ => unreachable!()
         }
-
-        let local_len = self.locals.len();
-        self.locals.extend(lambda.captures.clone());
-        for (argument, pattern) in args.iter().zip(&lambda.args) {
-            let value = self.eval_expr_lazy(argument, &lambda.module)?;
-            self.check_pattern(pattern, &value)?;
-            self.define_pattern_locals(pattern, value)?;
-        }
-        let result = self.eval_expr_lazy(&lambda.expr, &lambda.module);
-        self.locals.truncate(local_len);
-
-        result.map_err(|error| {
-            EvaluationError::complex(
-                BaseEvaluationError::ErrorWhileEvaluatingLambda,
-                ranges,
-                (Box::new(error), lambda.module.borrow().source_name.clone()),
-            )
-        })
     }
 
     fn eval_import(parts: &[String], ranges: Ranges) -> EvaluationResult<Value> {
@@ -548,29 +558,46 @@ impl Evaluator {
                 EvaluationError::basic(BaseEvaluationError::MainIsNotProvided, Default::default())
             })?;
 
+        module.borrow_mut().map.extend(prelude::get_map());
+
         let Value::Thunk(thunk) = main else {
             unreachable!()
         };
 
-        let Value::Lambda(lambda) = self.eval_expr_eager(&thunk.expr, &thunk.module)? else {
-            let ranges = definitions.iter().find(|(ident, _)| ident == "main").unwrap().1.ranges();
-            return Err(EvaluationError::basic(BaseEvaluationError::MainMustBeLambda, ranges))
-        };
+        match self.eval_expr_eager(&thunk.expr, &thunk.module)? {
+            Value::Native(native) => {
+                let result = native(self, &module, &[]);
+                if let Err(error) = native(self, &module, &[]) {
+                    if let BaseEvaluationError::NativeError(_) = error.error.data {
+                        let ranges = definitions.iter().find(|(ident, _)| ident == "main").unwrap().1.ranges();
+                        return Err(EvaluationError::basic(error.error.data, ranges));
+                    }
+                }
 
-        self.eval_expr_lazy(&lambda.expr, &lambda.module)
-            .map_err(|error| {
-                let ranges = definitions
-                    .iter()
-                    .find(|(ident, _)| ident == "main")
-                    .unwrap()
-                    .1
-                    .ranges();
-                EvaluationError::complex(
-                    BaseEvaluationError::ErrorWhileEvaluatingLambda,
-                    ranges,
-                    (Box::new(error), lambda.module.borrow().source_name.clone()),
-                )
-            })
+                result
+            },
+            Value::Lambda(lambda) => {
+                self.eval_expr_lazy(&lambda.expr, &lambda.module)
+                    .map_err(|error| {
+                        let ranges = definitions
+                            .iter()
+                            .find(|(ident, _)| ident == "main")
+                            .unwrap()
+                            .1
+                            .ranges();
+                        EvaluationError::complex(
+                            BaseEvaluationError::ErrorWhileEvaluatingLambda,
+                            ranges,
+                            (Box::new(error), lambda.module.borrow().source_name.clone()),
+                        )
+                    })
+            },
+            _ => {
+                let ranges = definitions.iter().find(|(ident, _)| ident == "main").unwrap().1.ranges();
+                Err(EvaluationError::basic(BaseEvaluationError::MainMustBeLambda, ranges))
+            }
+        }
+
     }
 }
 
@@ -589,6 +616,7 @@ pub enum BaseEvaluationError {
     IOError(io::Error),
     NonExhaustiveMatch,
     TypeMismatch { expected: Type, found: Type },
+    NativeError(String),
 }
 
 impl fmt::Display for BaseEvaluationError {
@@ -619,6 +647,7 @@ impl fmt::Display for BaseEvaluationError {
             Self::TypeMismatch { expected, found } => {
                 write!(f, "Expected `{expected}` instead found `{found}`.")
             }
+            Self::NativeError(error) => write!(f, "{error}"),
         }
     }
 }
@@ -648,6 +677,10 @@ impl EvaluationError {
         }
     }
 
+    pub fn native_error<T: Into<String>>(error: T) -> Self {
+        Self::basic(BaseEvaluationError::NativeError(error.into()), Default::default())
+    }
+
     pub fn report(&self, source_name: &str, source: &str) {
         if matches!(&self.error.data, BaseEvaluationError::MainIsNotProvided) {
             error::report_absent_main(&self.error.data, source_name);
@@ -666,4 +699,4 @@ impl EvaluationError {
     }
 }
 
-type EvaluationResult<T> = Result<T, EvaluationError>;
+pub type EvaluationResult<T> = Result<T, EvaluationError>;
