@@ -141,10 +141,14 @@ impl<'source> Parser<'source> {
 
     fn parse_grouping(&mut self) -> ParseResult<Expression> {
         let starts = self.expect(Token::OpeningParenthesis).unwrap().starts();
-        let expr = self.expression()?.data;
-        let ends = self.expect(Token::ClosingParenthesis)?.ends();
-
-        Ok(Ranged::new(expr, (starts, ends)))
+        Ok(if self.optional(Token::ClosingParenthesis) {
+            let ends = self.expect(Token::ClosingParenthesis).unwrap().ends();
+            Ranged::new(Expression::Unit, (starts, ends))
+        } else {
+            let expr = self.expression()?.data;
+            let ends = self.expect(Token::ClosingParenthesis)?.ends();
+            Ranged::new(expr, (starts, ends))
+        })
     }
 
     fn parse_let(&mut self) -> ParseResult<Expression> {
@@ -439,6 +443,7 @@ pub enum Expression {
         branches: Vec<(Ranged<Pattern>, Box<Ranged<Expression>>)>,
     },
     Boolean(bool),
+    Unit,
 }
 
 #[derive(Clone, Debug)]

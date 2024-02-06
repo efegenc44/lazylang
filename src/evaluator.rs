@@ -405,6 +405,7 @@ impl Evaluator {
                 branches,
             } => self.eval_match(match_expr, branches, expr.ranges(), module),
             Expression::Boolean(bool) => Ok(Value::Boolean(*bool)),
+            Expression::Unit => Ok(Value::Unit),
         }
     }
 

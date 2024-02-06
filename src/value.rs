@@ -13,6 +13,7 @@ pub enum Value {
     Lambda(Lambda),
     Module(Module),
     Boolean(bool),
+    Unit,
     Thunk(Thunk),
 }
 
@@ -45,6 +46,7 @@ impl Value {
             Self::Lambda(_) => Type::Lambda,
             Self::Module(_) => Type::Module,
             Self::Boolean(_) => Type::Boolean,
+            Self::Unit => Type::Unit,
             // Not supposed to encounter this branch
             // while evaluating, debug purposes only
             Self::Thunk(_) => Type::Thunk,
@@ -60,6 +62,7 @@ impl fmt::Display for Value {
             Self::Lambda(_) => write!(f, "<lambda>"),
             Self::Module(_) => write!(f, "<module>"),
             Self::Boolean(bool) => write!(f, "{bool}"),
+            Self::Unit => write!(f, "()"),
             Self::Thunk(_) => write!(f, "<thunk>"),
         }
     }
@@ -107,6 +110,7 @@ pub enum Type {
     Lambda,
     Module,
     Boolean,
+    Unit,
     Thunk,
 }
 
@@ -117,8 +121,9 @@ impl fmt::Display for Type {
             Self::Pair => write!(f, "Pair"),
             Self::Lambda => write!(f, "Lambda"),
             Self::Module => write!(f, "Module"),
-            Self::Thunk => write!(f, "Thunk"),
             Self::Boolean => write!(f, "Boolean"),
+            Self::Unit => write!(f, "Unit"),
+            Self::Thunk => write!(f, "Thunk"),
         }
     }
 }
