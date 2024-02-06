@@ -8,14 +8,18 @@ use crate::{
 };
 
 #[rustfmt::skip]
-const BINARY_OPERATORS: [(Token, Associativity, usize); 7] = [
-    (Token::OrKeyword,    Associativity::Left,  0),
-    (Token::AndKeyword,   Associativity::Left,  1),
-    (Token::DoubleEquals, Associativity::None,  2),
-    (Token::SlashEquals,  Associativity::None,  2),
-    (Token::Colon,        Associativity::Right, 3),
-    (Token::Plus,         Associativity::Left,  4),
-    (Token::Asterisk,     Associativity::Left,  5),
+const BINARY_OPERATORS: [(Token, Associativity, usize); 11] = [
+    (Token::OrKeyword,     Associativity::Left,  0),
+    (Token::AndKeyword,    Associativity::Left,  1),
+    (Token::DoubleEquals,  Associativity::None,  2),
+    (Token::SlashEquals,   Associativity::None,  2),
+    (Token::Less,          Associativity::None,  3),
+    (Token::LessEquals,    Associativity::None,  3),
+    (Token::Greater,       Associativity::None,  3),
+    (Token::GreaterEquals, Associativity::None,  3),
+    (Token::Colon,         Associativity::Right, 4),
+    (Token::Plus,          Associativity::Left,  5),
+    (Token::Asterisk,      Associativity::Left,  6),
 ];
 
 pub struct Parser<'source> {
@@ -526,6 +530,10 @@ pub enum BinaryOp {
     NonEquivalence,
     BooleanOr,
     BooleanAnd,
+    Less,
+    LessOrEqual,
+    Greater,
+    GreaterOrEqual,
 }
 
 impl std::fmt::Display for BinaryOp {
@@ -538,6 +546,10 @@ impl std::fmt::Display for BinaryOp {
             Self::NonEquivalence => write!(f, "/="),
             Self::BooleanOr => write!(f, "or"),
             Self::BooleanAnd => write!(f, "and"),
+            Self::Less => write!(f, "<"),
+            Self::LessOrEqual => write!(f, "<="),
+            Self::Greater => write!(f, ">"),
+            Self::GreaterOrEqual => write!(f, ">="),
         }
     }
 }
@@ -552,6 +564,10 @@ impl From<&Token> for BinaryOp {
             Token::SlashEquals => Self::NonEquivalence,
             Token::OrKeyword => Self::BooleanOr,
             Token::AndKeyword => Self::BooleanAnd,
+            Token::Less => Self::Less,
+            Token::LessEquals => Self::LessOrEqual,
+            Token::Greater => Self::Greater,
+            Token::GreaterEquals => Self::GreaterOrEqual,
             _ => unreachable!(),
         }
     }

@@ -9,6 +9,28 @@ use crate::{
     value::{self, Lambda, Module, Type, Value},
 };
 
+macro_rules! numeric_operation {
+    ($lhs:expr, $rhs:expr, $op:tt) => {
+        match ($lhs, $rhs) {
+            (Value::Integer(left_int), Value::Integer(right_int)) => {
+                Value::Integer(left_int $op right_int)
+            }
+            _ => unreachable!(),
+        }
+    };
+}
+
+macro_rules! comparison {
+    ($lhs:expr, $rhs:expr, $op:tt) => {
+        Value::Boolean(match ($lhs, $rhs) {
+            (Value::Integer(left_int), Value::Integer(right_int)) => {
+                left_int $op right_int
+            }
+            _ => unreachable!(),
+        })
+    };
+}
+
 pub struct Evaluator {
     locals: Vec<(String, Value)>,
 }
@@ -208,28 +230,16 @@ impl Evaluator {
         module: &Module,
     ) -> EvaluationResult<Value> {
         Ok(match bop {
-            BinaryOp::Addition => {
-                match (
-                    self.expect_number(lhs, module)?,
-                    self.expect_number(lhs, module)?,
-                ) {
-                    (Value::Integer(left_int), Value::Integer(right_int)) => {
-                        Value::Integer(left_int + right_int)
-                    }
-                    _ => unreachable!(),
-                }
-            }
-            BinaryOp::Multiplication => {
-                match (
-                    self.expect_number(lhs, module)?,
-                    self.expect_number(lhs, module)?,
-                ) {
-                    (Value::Integer(left_int), Value::Integer(right_int)) => {
-                        Value::Integer(left_int * right_int)
-                    }
-                    _ => unreachable!(),
-                }
-            }
+            BinaryOp::Addition => numeric_operation!(
+                self.expect_number(lhs, module)?,
+                self.expect_number(rhs, module)?,
+                +
+            ),
+            BinaryOp::Multiplication => numeric_operation!(
+                self.expect_number(lhs, module)?,
+                self.expect_number(rhs, module)?,
+                *
+            ),
             BinaryOp::Pairing => Value::pair(
                 self.eval_expr_lazy(lhs, module)?,
                 self.eval_expr_lazy(rhs, module)?,
@@ -245,19 +255,41 @@ impl Evaluator {
                 Value::Boolean(!self.value_equality(&left_value, &right_value)?)
             }
             BinaryOp::BooleanOr => {
-                if self.expect_boolean(lhs, module)? == true {
+                if self.expect_boolean(lhs, module)? {
                     Value::Boolean(true)
                 } else {
                     Value::Boolean(self.expect_boolean(rhs, module)?)
                 }
             }
-            BinaryOp::BooleanAnd => {
-                if self.expect_boolean(lhs, module)? == false {
+            BinaryOp::BooleanAnd =>
+            {
+                #[allow(clippy::if_not_else)]
+                if !self.expect_boolean(lhs, module)? {
                     Value::Boolean(false)
                 } else {
                     Value::Boolean(self.expect_boolean(rhs, module)?)
                 }
             }
+            BinaryOp::Less => comparison!(
+                self.expect_number(lhs, module)?,
+                self.expect_number(rhs, module)?,
+                <
+            ),
+            BinaryOp::LessOrEqual => comparison!(
+                self.expect_number(lhs, module)?,
+                self.expect_number(rhs, module)?,
+                <=
+            ),
+            BinaryOp::Greater => comparison!(
+                self.expect_number(lhs, module)?,
+                self.expect_number(rhs, module)?,
+                >
+            ),
+            BinaryOp::GreaterOrEqual => comparison!(
+                self.expect_number(lhs, module)?,
+                self.expect_number(rhs, module)?,
+                >=
+            ),
         })
     }
 
